@@ -1,105 +1,156 @@
-name: Deploy to k8s
+name: Build & Deploy
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main    # main 브랜치에 push 될 때마다 자동 실행
 
-# [추가] 동시성 제어 (이전 대화에서 권장드린 설정)
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+env:
+  REGISTRY: ghcr.io
+  # ── 본인 GitHub 계정/조직명으로 교체하세요 ────────────────────────────────
+  IMAGE_BACKEND:  ghcr.io/${{ github.repository_owner }}/moneta-backend
+  IMAGE_FRONTEND: ghcr.io/${{ github.repository_owner }}/moneta-frontend
 
 jobs:
-  build:
+  # ────────────────────────────────────────────────────────────────────────────
+  # 1. 백엔드 이미지 빌드 & GHCR 푸시
+  # ────────────────────────────────────────────────────────────────────────────
+  build-backend:
+    name: Build Backend
     runs-on: ubuntu-latest
-
     permissions:
       contents: read
       packages: write
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1 # [최적화] 최신 커밋만 가져오기
 
-      # 👇 [필수 추가] 이 단계가 없으면 캐시 export 에러가 납니다!
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set lower case owner name
-        run: |
-          echo "OWNER_LC=${OWNER,,}" >> ${GITHUB_ENV}
-        env:
-          OWNER: ${{ github.repository_owner }}
-
-      - name: Generate Version Tag
+      - name: Extract metadata
         id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_BACKEND }}
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          dockerfile: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 2. 프론트엔드 이미지 빌드 & GHCR 푸시
+  # ────────────────────────────────────────────────────────────────────────────
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_FRONTEND }}
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          dockerfile: Dockerfile.frontend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 3. K8s 배포 (빌드 두 개 완료 후 실행)
+  #
+  #  필요한 GitHub Secrets (Settings → Secrets → Actions):
+  #    KUBE_CONFIG       - base64 인코딩된 kubeconfig
+  #                        생성: cat ~/.kube/config | base64 -w 0
+  #    GEMINI_API_KEY    - Google Gemini API 키
+  #    OPENAI_API_KEY    - OpenAI API 키
+  #    SERPER_API_KEY    - Google Serper API 키 (선택)
+  #    JWT_SECRET_KEY    - JWT 서명 시크릿
+  #    NEXTAUTH_SECRET   - NextAuth 시크릿 (선택)
+  # ────────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to K8s
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure kubeconfig
         run: |
-          VERSION=$(grep '^version' pyproject.toml | head -1 | cut -d '"' -f 2)
-          SHA=$(git rev-parse --short HEAD)
-          TAG="${VERSION}-${SHA}"
-          echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
 
-      # [Backend 빌드]
-      - name: Build and push Docker image (Backend)
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ env.OWNER_LC }}/moneta-backend:${{ env.IMAGE_TAG }}
-            ghcr.io/${{ env.OWNER_LC }}/moneta-backend:latest
-          # [수정] 캐시 설정 + scope 추가 (backend용)
-          cache-from: type=gha,scope=backend
-          cache-to: type=gha,mode=max,scope=backend
+      - name: Create/Update K8s Secret
+        run: |
+          kubectl create secret generic app-secret \
+            --namespace moneta \
+            --from-literal=GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" \
+            --from-literal=OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+            --from-literal=SERPER_API_KEY="${{ secrets.SERPER_API_KEY }}" \
+            --from-literal=JWT_SECRET_KEY="${{ secrets.JWT_SECRET_KEY }}" \
+            --from-literal=NEXTAUTH_SECRET="${{ secrets.NEXTAUTH_SECRET }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
 
-      # [Frontend 빌드]
-      - name: Build and push Frontend image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.frontend
-          push: true
-          tags: |
-            ghcr.io/${{ env.OWNER_LC }}/moneta-frontend:${{ env.IMAGE_TAG }}
-            ghcr.io/${{ env.OWNER_LC }}/moneta-frontend:latest
-          # [추가] 프론트엔드도 캐시 적용 + scope 분리 (frontend용)
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,mode=max,scope=frontend
+      - name: Apply K8s manifests
+        run: |
+          kubectl apply -f infra/k8s/application/01-namespace.yaml
+          kubectl apply -f infra/k8s/application/02-configmap.yaml
+          kubectl apply -f infra/k8s/application/03-chromadb.yaml
+          kubectl apply -f infra/k8s/application/04-backend.yaml
+          kubectl apply -f infra/k8s/application/05-ingress.yaml
+          kubectl apply -f infra/k8s/application/06-frontend.yaml
+          kubectl apply -f infra/k8s/application/07-pvc.yaml
 
-      - name: Deploy to EC2 via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            cd /home/ubuntu/workspace/deploy/novelbright
-            
-            git reset --hard
-            git pull origin main
-            
-            cd infra/k8s/application
-            
-            BACKEND_IMAGE="ghcr.io/${{ env.OWNER_LC }}/moneta-backend:${{ env.IMAGE_TAG }}"
-            FRONTEND_IMAGE="ghcr.io/${{ env.OWNER_LC }}/moneta-frontend:${{ env.IMAGE_TAG }}"
-            
-            echo "Updating deployment to backend image: $BACKEND_IMAGE"
-            echo "Updating deployment to frontend image: $FRONTEND_IMAGE"
-            
-            sed -i "s|image: ghcr.io/${{ env.OWNER_LC }}/moneta-backend:.*|image: $BACKEND_IMAGE|g" 04-backend.yaml
-            sed -i "s|image: ghcr.io/${{ env.OWNER_LC }}/moneta-frontend:.*|image: $FRONTEND_IMAGE|g" 06-frontend.yaml
-            
-            kubectl apply -f .
-            
-            kubectl rollout status deployment/backend -n moneta
-            kubectl rollout status deployment/frontend -n moneta
+      - name: Rollout restart (pull new images)
+        run: |
+          kubectl rollout restart deployment/backend  -n moneta
+          kubectl rollout restart deployment/frontend -n moneta
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/backend  -n moneta --timeout=120s
+          kubectl rollout status deployment/frontend -n moneta --timeout=120s

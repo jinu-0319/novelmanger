@@ -1,34 +1,76 @@
 version: '3.8'
 
+# 로컬 실행: docker compose --env-file ../../.env up --build
+# 프로덕션:  이미지 태그를 ghcr.io/YOUR_ORG/moneta-backend:latest 등으로 교체
+
 services:
+
+  # ── ChromaDB (벡터 DB) ───────────────────────────────────────────────────
   chromadb:
     image: chromadb/chroma:latest
-    container_name: chromadb
+    container_name: moneta-chromadb
     ports:
-      - "8000:8000"
+      - "8800:8000"   # 호스트 8800 → 컨테이너 8000 (백엔드 포트와 충돌 방지)
     environment:
       - CHROMA_HOST_ADDR=0.0.0.0
       - CHROMA_HOST_PORT=8000
+    volumes:
+      - chromadb-data:/chroma/chroma
     networks:
-      - gangwon-network
+      - moneta-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/v1/heartbeat || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI 백엔드 ────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ../..        # 프로젝트 루트 (Dockerfile 위치)
+      dockerfile: Dockerfile
+    container_name: moneta-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../../.env          # 프로젝트 루트의 .env 파일 사용
+    environment:
+      - CHROMA_HOST=chromadb   # docker 내부 서비스 이름으로 오버라이드
+      - CHROMA_PORT=8000       # 컨테이너 내부 포트
+      - ALLOWED_ORIGINS=http://localhost:3000
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    networks:
+      - moneta-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Next.js 프론트엔드 ────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.frontend
+    container_name: moneta-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - moneta-network
     restart: unless-stopped
 
-  backend:
-    image: upstage-gangwon-backend:lite
-    container_name: upstage-gangwon-backend
-    ports:
-      - "8880:8880"
-    environment:
-      - UPSTAGE_API_KEY=${UPSTAGE_API_KEY}
-      - CHROMA_HOST=${CHROMA_HOST}
-      - CHROMA_PORT=${CHROMA_PORT}
-    depends_on:
-      - chromadb
-    networks:
-      - gangwon-network
-    restart: unless-stopped
+volumes:
+  chromadb-data:
 
 networks:
-  gangwon-network:
+  moneta-network:
     driver: bridge
-

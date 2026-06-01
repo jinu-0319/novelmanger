@@ -4,6 +4,14 @@ metadata:
   name: app-config
   namespace: moneta
 data:
+  # ChromaDB 서비스 주소 (K8s 내부 DNS)
   CHROMA_HOST: "chromadb"
   CHROMA_PORT: "8000"
-  UPSTAGE_API_KEY: "${UPSTAGE_API_KEY}"
+  CHROMA_COLLECTION_NAME: "moneta_embeddings"
+
+  # CORS — 실제 도메인으로 교체
+  # ALLOWED_ORIGINS: "https://your-domain.com"
+  ALLOWED_ORIGINS: "http://localhost:3000"
+
+  # 백엔드 URL (프론트엔드 → 백엔드 프록시용)
+  BACKEND_URL: "http://backend:8000"
