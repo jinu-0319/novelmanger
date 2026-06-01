@@ -7,7 +7,7 @@ load_dotenv()
 
 import chromadb
 from langchain_chroma import Chroma
-from langchain_upstage import UpstageEmbeddings
+from app.core.llm import get_embeddings
 from langchain_core.documents import Document
 
 # 벡터 DB가 저장될 로컬 폴더 경로
@@ -16,16 +16,24 @@ from langchain_core.documents import Document
 class HistoryVectorStore:
     def __init__(self):
         # 1. 임베딩 모델 설정 (Upstage Solar)
-        self.embedding_model = UpstageEmbeddings(model="solar-embedding-1-large")
+        self.embedding_model = get_embeddings()
 
-        # [변경 3] 환경변수에서 ChromaDB 접속 정보 가져오기
-        # Kubernetes Service 이름이 'chromadb'라면 host 기본값을 'chromadb'로 설정
         chroma_host = os.getenv("CHROMA_HOST", "chromadb")
         chroma_port = os.getenv("CHROMA_PORT", "8000")
 
-        # [변경 4] HttpClient 생성 (서버 접속용)
-        # 로컬 파일에 쓰는 것이 아니라, http://chromadb:8000 으로 접속합니다.
-        self.client = chromadb.HttpClient(host=chroma_host, port=int(chroma_port))
+        # localhost/127.0.0.1이면 서버 없이 로컬 파일 모드로 실행
+        # 프로덕션(K8s)에서는 HttpClient로 외부 서버에 접속
+        local_hosts = {"localhost", "127.0.0.1"}
+        if chroma_host in local_hosts:
+            persist_dir = os.path.join(
+                os.path.dirname(__file__), "..", "..", "data", "chroma_db"
+            )
+            os.makedirs(persist_dir, exist_ok=True)
+            self.client = chromadb.PersistentClient(path=persist_dir)
+            print(f"📂 ChromaDB 로컬 모드: {persist_dir}")
+        else:
+            self.client = chromadb.HttpClient(host=chroma_host, port=int(chroma_port))
+            print(f"🌐 ChromaDB 서버 모드: {chroma_host}:{chroma_port}")
 
         # [변경 5] Chroma 초기화 시 client 주입
         self.vector_db = Chroma(

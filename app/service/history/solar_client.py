@@ -5,17 +5,14 @@ import os
 import requests
 from typing import Any, Dict, List
 from dotenv import load_dotenv
-from langchain_upstage import ChatUpstage
 from langchain_core.messages import SystemMessage, HumanMessage
+from app.core.llm import get_llm
 
 load_dotenv()
 
 class HistoryLLMClient:
     def __init__(self) -> None:
-        self.llm = ChatUpstage(model="solar-pro")
-        self.api_key = os.getenv("SOLAR_API_KEY", "").strip()
-        self.base_url = os.getenv("SOLAR_BASE_URL", "https://api.upstage.ai/v1/chat/completions").strip()
-        self.model = os.getenv("SOLAR_MODEL", "solar-pro").strip()
+        self.llm = get_llm(temperature=0.1)
 
     def parse_history_command(self, text: str) -> List[Dict[str, Any]]:
         """

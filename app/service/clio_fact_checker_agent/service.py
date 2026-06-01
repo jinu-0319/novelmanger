@@ -1,11 +1,14 @@
 import json
-import time
 import re
-from typing import List, Dict, Any, Set
+from typing import List, Dict, Any, Set, Optional
 import difflib
+from cachetools import TTLCache
+
+# ── 웹 검색 결과 캐시 (최대 500개 항목, 1시간 TTL) ─────────────────────────
+_search_cache: TTLCache = TTLCache(maxsize=500, ttl=3600)
 
 # LangChain & AI 관련
-from langchain_upstage import ChatUpstage
+from app.core.llm import get_llm
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.utilities import GoogleSerperAPIWrapper
@@ -14,14 +17,26 @@ from langchain_community.utilities import GoogleSerperAPIWrapper
 from app.service.clio_fact_checker_agent.repo import ManuscriptRepository
 
 class ManuscriptAnalyzer:
-    def __init__(self, setting_path: str, character_path: str):
-        # 1. LLM 설정 (Solar-pro)
-        self.llm = ChatUpstage(model="solar-pro")
+    def __init__(
+        self,
+        setting_path: str,
+        character_path: str,
+        extra_fiction_terms: list[str] | None = None,
+    ):
+        # 1. LLM 설정
+        self.llm = get_llm(temperature=0.1)
 
         # 2. 소설 설정(Plot DB) 로드 -> 허구 정보 필터링용
         self.settings = self._load_settings(setting_path)
         self.character_data = self._load_settings(character_path)
         self.setting_keywords = self._extract_setting_keywords()
+
+        # 3. 위키에서 넘어온 허구 고유명사 추가 (웹 검색 오작동 방지)
+        if extra_fiction_terms:
+            for term in extra_fiction_terms:
+                t = (term or "").strip()
+                if t:
+                    self.setting_keywords.add(t)
 
         # 3. 로컬 벡터 DB (기존 지식)
         self.repo = ManuscriptRepository()
@@ -68,9 +83,29 @@ class ManuscriptAnalyzer:
 
         return keywords
 
+    @staticmethod
+    def _is_content_equal(text1: str, text2: str) -> bool:
+        """공백·특수문자를 제거한 뒤 두 문자열이 동일한지 비교"""
+        def normalize(s: str) -> str:
+            return re.sub(r'[\s\W_]+', '', s)
+        return normalize(text1) == normalize(text2)
+
+    def _retry_extract_sentence(self, chunk_text: str, keyword: str) -> Optional[str]:
+        """LLM을 통해 키워드가 포함된 원문 문장을 재추출"""
+        prompt = f"키워드 '{keyword}'가 포함된 문장을 원문 그대로 추출하세요. 없으면 None."
+        try:
+            res = self.llm.invoke([
+                SystemMessage(content=prompt),
+                HumanMessage(content=chunk_text[:3000]),
+            ])
+            val = res.content.strip().strip('"\'')
+            return None if val == "None" or len(val) < 2 else val
+        except Exception:
+            return None
+
     def analyze_manuscript(self, text: str) -> Dict[str, Any]:
         """
-        [수정됨] 1차(탐지) + 2차(감수) 의견 동시 리포팅 버전
+        1차(탐지) + 2차(감수) 의견 동시 리포팅
         """
         print(f"📄 원고 분석 시작 (총 {len(text)}자)")
 
@@ -79,56 +114,36 @@ class ManuscriptAnalyzer:
         # 1. 텍스트 분할 및 명제(Query) 추출
         all_query_items = []
 
-        for i, chunk in enumerate(chunks):
+        for chunk in chunks:
             items = self._extract_search_queries(chunk)
 
             for item in items:
                 kw = item['keyword']
                 origin_snippet = item.get('original_sentence', '')
 
-                # 위치 찾기 로직
                 start_idx, end_idx = self._find_exact_position(
                     full_text=text,
                     target_snippet=origin_snippet,
-                    start_from=0
+                    start_from=0,
                 )
 
-                # 내부 헬퍼 함수 정의
-                def _is_content_equal(text1, text2):
-                    def normalize(s): return re.sub(r'[\s\W_]+', '', s)
-                    return normalize(text1) == normalize(text2)
-
-                def _retry_extract_sentence(chunk_text, keyword):
-                    prompt = f"키워드 '{keyword}'가 포함된 문장을 원문 그대로 추출하세요. 없으면 None."
-                    try:
-                        res = self.llm.invoke([SystemMessage(content=prompt), HumanMessage(content=chunk_text[:3000])])
-                        val = res.content.strip().strip('"\'')
-                        return None if val == "None" or len(val) < 2 else val
-                    except: return None
-
-                # 위치 검증 및 재시도 로직
+                # 위치 검증 및 재시도
                 is_match_success = False
                 if start_idx != -1:
                     actual_found_text = text[start_idx:end_idx]
-                    if actual_found_text == origin_snippet or _is_content_equal(actual_found_text, origin_snippet):
+                    if (actual_found_text == origin_snippet
+                            or self._is_content_equal(actual_found_text, origin_snippet)):
                         is_match_success = True
 
-                if start_idx == -1 or (start_idx != -1 and not is_match_success):
-                    # print(f"   🔄 [재시도] '{kw}' 위치 재탐색...")
-                    new_snippet = _retry_extract_sentence(chunk, kw)
+                if start_idx == -1 or not is_match_success:
+                    new_snippet = self._retry_extract_sentence(chunk, kw)
                     if new_snippet:
                         start_idx, end_idx = self._find_exact_position(text, new_snippet, 0)
                         if start_idx != -1:
                             item['original_sentence'] = new_snippet
 
-                # 결과 저장 (실패했더라도 start_idx=-1로 저장)
-                if start_idx != -1:
-                    item['start_index'] = start_idx
-                    item['end_index'] = end_idx
-                else:
-                    item['start_index'] = -1
-                    item['end_index'] = -1
-
+                item['start_index'] = start_idx if start_idx != -1 else -1
+                item['end_index'] = end_idx if start_idx != -1 else -1
                 all_query_items.append(item)
 
         print(f"   -> 총 {len(all_query_items)}개의 검색 후보 추출됨")
@@ -144,11 +159,10 @@ class ManuscriptAnalyzer:
             origin_sent = item_data.get('original_sentence', '')
 
             # 허구 필터링
-            is_fiction = False
-            for fiction_term in self.setting_keywords:
-                if fiction_term in keyword or keyword in fiction_term:
-                    is_fiction = True
-                    break
+            is_fiction = any(
+                fiction_term in keyword or keyword in fiction_term
+                for fiction_term in self.setting_keywords
+            )
 
             if is_fiction:
                 known_settings.append(keyword)
@@ -159,7 +173,6 @@ class ManuscriptAnalyzer:
             search_data = self._check_local_db(keyword)
             if not search_data:
                 search_data = self._search_web(query_string)
-                time.sleep(0.1)
 
             if search_data:
                 item_id = str(len(verification_queue))
@@ -242,7 +255,7 @@ class ManuscriptAnalyzer:
         [수정됨] 단순 명사가 아닌 '역사적 사실 관계(명제)'와 '시대적 정합성'을 검증하는 쿼리 생성기
         """
         prompt = """
-        당신은 역사 소설의 고증 오류를 찾아내는 '팩트체크 쿼리 설계자'입니다.
+        당신은 한국의 대체 역사 웹소설 전개의 역사적 합리성과 고증을 검수해주는 고문이자, 역사 소설의 고증 오류를 찾아내는 '팩트체크 쿼리 설계자'입니다.
         단순한 고유명사 추출이 아니라, **"이 내용이 역사적으로 가능한가?"**를 검증하기 위한 **명제(Proposition)와 맥락**을 추출하세요.
 
         [추출 기준: 무엇을 검증해야 하는가?]
@@ -310,7 +323,11 @@ class ManuscriptAnalyzer:
             return None
 
     def _search_web(self, query: str) -> Dict[str, Any]:
-        """Serper 웹 검색"""
+        """Serper 웹 검색 (모듈 레벨 캐시 적용)"""
+        cache_key = query.strip().lower()
+        if cache_key in _search_cache:
+            return _search_cache[cache_key]
+
         try:
             # 검색어에 '역사' 키워드가 없다면 추가 (영어/한글 혼용)
             if "역사" not in query and "history" not in query.lower():
@@ -321,14 +338,18 @@ class ManuscriptAnalyzer:
             result_text = self.search_tool.run(final_query)
 
             if not result_text or len(result_text) < 10:
+                _search_cache[cache_key] = None
                 return None
 
-            return {
-                "keyword": query, # 검색에 쓴 쿼리 저장
+            result = {
+                "keyword": query,
                 "content": result_text,
                 "source": "Web Search (Serper)"
             }
+            _search_cache[cache_key] = result
+            return result
         except Exception:
+            _search_cache[cache_key] = None
             return None
 
     def _verify_batch_relevance(self, batch_items: List[Dict]) -> Dict[str, Dict]:
@@ -344,7 +365,7 @@ class ManuscriptAnalyzer:
             """
 
         prompt = f"""
-        당신은 역사 소설 팩트체커입니다. 아래 주어진 항목들(ID별)을 검증하세요.
+        당신은 한국의 대체 역사 웹소설 전개의 역사적 합리성과 고증을 검수해주는 고문이자 역사 소설 팩트체커입니다. 아래 주어진 항목들(ID별)을 검증하세요.
 
         [입력 데이터]
         {items_text}
@@ -393,7 +414,7 @@ class ManuscriptAnalyzer:
             """
 
         prompt = f"""
-        당신은 역사 팩트체크 팀의 **'수석 감수관'**입니다.
+        당신은 한국의 대체 역사 웹소설 전개의 역사적 합리성과 고증을 검수해주는 고문이자, 역사 팩트체크 팀의 **'수석 감수관'**입니다.
         앞선 1차 검증 결과가 타당한지 비판적으로 재검토하여 최종 결론을 내리세요.
 
         [입력 데이터]
@@ -433,7 +454,7 @@ class ManuscriptAnalyzer:
                 json_str = text[start:end+1]
                 return json.loads(json_str)
             return []
-        except:
+        except Exception:
             return []
 
     def _clean_json_string(self, text: str) -> str:

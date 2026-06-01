@@ -1,5 +1,13 @@
 **/chroma_data/**
 
+# 사용자 개인 데이터 (계정 정보, 소설 데이터)
+app/data/users.json
+app/data/users/
+app/data/chroma_db/
+
+# PyCharm 실행 설정 (로컬 전용)
+.idea/runConfigurations/
+
 ### Python template
 # Byte-compiled / optimized / DLL files
 __pycache__/

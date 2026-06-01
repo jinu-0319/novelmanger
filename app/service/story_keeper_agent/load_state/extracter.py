@@ -8,9 +8,9 @@ from typing import Any, Dict, List, Optional
 
 try:
     from dotenv import load_dotenv
-    from langchain_upstage import ChatUpstage
+    from app.core.llm import get_llm as _get_llm
 except ImportError:
-    ChatUpstage = None
+    _get_llm = None
 
 
 def _project_root() -> Path:
@@ -55,7 +55,7 @@ def _safe_str(x: Any) -> str:
 
 
 class PlotManager:
-    def __init__(self):
+    def __init__(self, user_id: str = "default", novel_id: str = "default"):
         self._fix_ssl_cert_env()
 
         try:
@@ -67,12 +67,17 @@ class PlotManager:
 
         self.llm = self._init_llm()
 
-        # ✅ 무조건 app/data 기준
-        self.data_dir = _project_root() / "app" / "data"
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-
-        self.history_file = self.data_dir / "story_history.json"
-        self.global_setting_file = self.data_dir / "plot.json"
+        # ✅ 소설별 격리 경로 사용 (user_id / novel_id 기반)
+        try:
+            from app.core.paths import story_history_path, plot_path
+            self.history_file = Path(story_history_path(user_id, novel_id))
+            self.global_setting_file = Path(plot_path(user_id, novel_id))
+        except Exception:
+            # 레거시 폴백: app/data 기준
+            self.data_dir = _project_root() / "app" / "data"
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            self.history_file = self.data_dir / "story_history.json"
+            self.global_setting_file = self.data_dir / "plot.json"
 
         print(f"📂 story_history path = {self.history_file}")
         print(f"📂 plot.json path     = {self.global_setting_file}")
@@ -85,12 +90,11 @@ class PlotManager:
         except Exception:
             pass
 
-    def _init_llm(self) -> Optional["ChatUpstage"]:
-        key = (os.getenv("UPSTAGE_API_KEY") or "").strip()
-        if not key or ChatUpstage is None:
+    def _init_llm(self):
+        if _get_llm is None:
             return None
         try:
-            return ChatUpstage(model="solar-pro")
+            return _get_llm(temperature=0.2)
         except Exception:
             return None
 
@@ -221,8 +225,50 @@ class PlotManager:
         _write_json(self.history_file, history)
         return {"status": "success", "data": history[str(episode_no)]}
 
-    def extract_facts(self, episode_no, full_text, story_state):
-        return {"episode_no": episode_no, "events": [], "characters": [], "state_changes": {}}
+    def extract_facts(self, episode_no: int, full_text: str, story_state: Any) -> Dict[str, Any]:
+        """
+        회차 본문에서 구조화된 팩트를 추출한다.
+        - 등장인물 현재 상태/위치
+        - 주요 사건
+        - 상태 변화 (부상, 사망, 이동 등)
+        추출 결과는 세계관·캐릭터·플롯 룰 검사 프롬프트에 함께 주입되어
+        LLM이 '이번 회차에 무슨 일이 있었는지'를 명확히 파악하게 한다.
+        """
+        base: Dict[str, Any] = {
+            "episode_no": episode_no,
+            "events": [],
+            "characters": [],
+            "state_changes": {},
+        }
+        if not (full_text or "").strip() or self.llm is None:
+            return base
+
+        prompt = f"""너는 웹소설 편집자다. 아래 {episode_no}화 원고에서 이번 회차에서 '확정된 사실'만 추출하라.
+추측·암시·비유·꿈·회상은 반드시 제외한다.
+반드시 JSON 형식으로만 반환하고 다른 텍스트는 포함하지 마라.
+
+{{
+  "characters": [
+    {{"name": "인물명", "state": "현재 상태(생존/부상/사망 등)", "location": "현재 위치(없으면 null)"}}
+  ],
+  "events": ["이번 회차 주요 사건 (구체적 1문장)"],
+  "state_changes": {{
+    "대상(인물명 또는 설정명)": "변화 내용"
+  }}
+}}
+
+원고({episode_no}화):
+{full_text[:4000]}"""
+
+        try:
+            res = self.llm.invoke(prompt)
+            data = self._safe_json(getattr(res, "content", "") or "")
+            if isinstance(data, dict):
+                base.update(data)
+        except Exception as e:
+            print(f"⚠️ extract_facts 실패 (계속 진행): {e}")
+
+        return base
 
 
 # -------------------------------------------------------------------

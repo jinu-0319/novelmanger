@@ -1,71 +1,80 @@
 # app/service/clio_fact_checker_agent/router.py
 
-import os
+import asyncio
 import json
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
-from typing import Dict, Any
 
-# 상대 경로 import 사용 (.service, .schemas)
-from .schemas import ManuscriptInput
 from .service import ManuscriptAnalyzer
+from app.auth.deps import get_current_user_id
+import app.core.paths as core_paths
 
 router = APIRouter(prefix="/manuscript", tags=["Fact Checker"])
 
-# 설정 파일 경로
-# 주의: 실행 위치에 따라 경로가 달라질 수 있으므로 절대 경로 사용 권장
-BASE_DIR = os.getcwd()
-PLOT_DB_PATH = os.path.join(BASE_DIR, "app/data/plot.json") # 경로 확인 필요
-CHARACTER_DB_PATH = os.path.join(BASE_DIR, "app/data/characters.json")
 
-# Analyzer 인스턴스 (전역)
-# 실제 프로덕션에서는 Depends를 이용한 의존성 주입을 권장하지만, 현재 구조 유지
+def _build_analyzer(user_id: str, novel_id: str, extra_fiction_terms: list[str]) -> ManuscriptAnalyzer:
+    """사용자/소설별 설정 경로를 사용해 ManuscriptAnalyzer 생성"""
+    return ManuscriptAnalyzer(
+        setting_path=core_paths.plot_path(user_id, novel_id),
+        character_path=core_paths.characters_path(user_id, novel_id),
+        extra_fiction_terms=extra_fiction_terms or None,
+    )
 
 
 @router.post("/analyze")
 async def analyze_manuscript_file(
+    novel_id: str = Form(..., description="분석 대상 소설 ID"),
     title: str = Form(...),
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    wiki_context: str = Form("", description="JSON-encoded wiki items (장기 기억 위키)"),
+    user_id: str = Depends(get_current_user_id),
 ):
     """
-    [파일 업로드] 원고 분석 요청
+    원고 파일을 업로드해 역사 고증 분석을 수행합니다.
+    소설별 설정(plot.json, characters.json)을 허구 필터로 활용합니다.
     """
-    analyzer = ManuscriptAnalyzer(setting_path=PLOT_DB_PATH, character_path=CHARACTER_DB_PATH)
+    # 위키에서 허구 고유명사 추출 (웹 검색 오탐 방지)
+    extra_fiction_terms: list[str] = []
+    if wiki_context:
+        try:
+            wiki_items = json.loads(wiki_context)
+            extra_fiction_terms = [
+                item["title"].strip()
+                for item in wiki_items
+                if item.get("title")
+            ]
+        except Exception:
+            extra_fiction_terms = []
 
+    # 파일 읽기 (비동기)
     try:
-        # 1. 파일 읽기 (Bytes -> String)
         content_bytes = await file.read()
         raw_content = content_bytes.decode("utf-8")
-
-        # 2. [핵심] JSON 파싱 및 본문 추출
-        # 사용자가 "JSON 내에서 소설의 키 값은 file"이라고 했으므로 이를 처리
-        try:
-            json_data = json.loads(raw_content)
-
-            # JSON인 경우: 'file' 키가 있는지 확인
-            if isinstance(json_data, dict) and "file" in json_data:
-                real_text = json_data["file"] # 소설 본문만 추출
-                print("✅ JSON 파일 감지: 'file' 키의 본문 내용을 추출했습니다.")
-            else:
-                # JSON이지만 'file' 키가 없거나 구조가 다르면 -> 일단 전체 사용 (혹은 에러 처리)
-                real_text = raw_content
-                print("⚠️ JSON 형식이지만 'file' 키를 찾을 수 없어 전체 내용을 사용합니다.")
-
-        except json.JSONDecodeError:
-            # JSON이 아님 (일반 txt 파일 등) -> 전체 내용 사용
-            real_text = raw_content
-            print("ℹ️ 일반 텍스트 파일로 처리합니다.")
-
-        # 3. 분석 수행 (껍데기가 제거된 순수 본문만 전달)
-        result = analyzer.analyze_manuscript(real_text)
-
-        return {
-            "title": title,
-            "filename": file.filename,
-            "analysis_result": result
-        }
-
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="파일은 UTF-8 형식이어야 합니다.")
+
+    # JSON 형식이면 'file' 키 추출, 아니면 전체 텍스트 사용
+    try:
+        json_data = json.loads(raw_content)
+        if isinstance(json_data, dict) and "file" in json_data:
+            real_text = json_data["file"]
+        else:
+            real_text = raw_content
+    except json.JSONDecodeError:
+        real_text = raw_content
+
+    # ManuscriptAnalyzer.analyze_manuscript 는 동기·블로킹 함수이므로
+    # 이벤트 루프 차단을 피하기 위해 ThreadPoolExecutor에서 실행
+    try:
+        loop = asyncio.get_running_loop()
+        analyzer = _build_analyzer(user_id, novel_id, extra_fiction_terms)
+        result = await loop.run_in_executor(
+            None, analyzer.analyze_manuscript, real_text
+        )
     except Exception as e:
-        print(f"❌ 분석 중 오류: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"분석 중 오류가 발생했습니다: {str(e)}")
+
+    return {
+        "title": title,
+        "filename": file.filename,
+        "analysis_result": result,
+    }

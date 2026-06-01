@@ -1,14 +1,14 @@
 # app/service/story_keeper_agent/api.py
-import sys
+import asyncio
 import os
 import json
+import logging
 from pathlib import Path
 
-sys.path.insert(0, os.getcwd())
-
-from fastapi import APIRouter, HTTPException, Body, Form, Query
-from pydantic import ValidationError, BaseModel
-from typing import Any, Dict
+from fastapi import APIRouter, HTTPException, Body, Query, Depends
+from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
+from typing import Any, AsyncGenerator, Dict
 
 from app.service.story_keeper_agent.ingest_episode import (
     ingest_episode,
@@ -18,18 +18,12 @@ from app.service.story_keeper_agent.ingest_episode.chunking import split_into_ch
 from app.service.story_keeper_agent.load_state.extracter import PlotManager
 
 from app.service.story_keeper_agent.rules.check_consistency import check_consistency
-from app.service.characters import upsert_character
+from app.auth.deps import get_current_user_id
+import app.core.paths as core_paths
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/story", tags=["story-keeper"])
-manager = PlotManager()
-
-
-def _project_root() -> Path:
-    return Path(__file__).resolve().parents[3]
-
-
-def _data_path(filename: str) -> str:
-    return str(_project_root() / "app" / "data" / filename)
 
 
 def _safe_read_json(path: str) -> dict:
@@ -49,11 +43,6 @@ def _safe_write_json(path: str, data: Any) -> None:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
 
-def _load_plot_config() -> dict:
-    path = _data_path("plot.json")
-    return _safe_read_json(path)
-
-
 def _extract_world_from_plot(plot_config: dict) -> dict:
     if not isinstance(plot_config, dict):
         return {}
@@ -64,16 +53,19 @@ def _extract_world_from_plot(plot_config: dict) -> dict:
     return plot_config if isinstance(plot_config, dict) else {}
 
 
-def _load_story_history() -> dict:
-    path = _data_path("story_history.json")
+def _load_plot_config_for(user_id: str, novel_id: str) -> dict:
+    return _safe_read_json(core_paths.plot_path(user_id, novel_id))
+
+
+def _load_story_history_for(user_id: str, novel_id: str) -> dict:
+    path = core_paths.story_history_path(user_id, novel_id)
     return _safe_read_json(path)
 
 
-def _load_character_config() -> dict:
-    path = _data_path("characters.json")
+def _load_character_config_for(user_id: str, novel_id: str) -> dict:
+    path = core_paths.characters_path(user_id, novel_id)
     if not os.path.exists(path):
         return {"characters": []}
-
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -96,197 +88,210 @@ def _load_character_config() -> dict:
     return {"characters": []}
 
 
-def _call_upsert_character(name: str, text: str):
-    print(f"📂 현재 실행 위치(CWD): {os.getcwd()}")
-    target_path = os.path.abspath(_data_path("characters.json"))
-    print(f"💾 실제 저장 시도 경로: {target_path}")
-
-    try:
-        result = upsert_character(
-            name=name,
-            features=text,
-            db_path=target_path
-        )
-
-        if result.get("status") == "success":
-            print(f"✅ 저장 성공! 저장된 키(Key): {result.get('name')}")
-            print(f"   👉 행동: {result.get('action')}")
-        else:
-            print(f"❌ 저장 실패 응답: {result}")
-
-        return result
-    except TypeError:
-        return upsert_character(name, text)
-    except Exception:
-        raise
+def _sse_event(event: str, data: Any) -> str:
+    """SSE 이벤트 포맷팅"""
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-@router.get(
-    "/history",
-    summary="Story History",
-    description="app/data/story_history.json을 그대로 반환",
-)
-def get_story_history():
-    try:
-        history = _load_story_history()
-        if not isinstance(history, dict):
-            history = {}
-        return {"history": history}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"history load failed: {e}")
+async def _run_manuscript_pipeline(
+    *,
+    episode_no: int,
+    full_text_str: str,
+    novel_id: str,
+    user_id: str,
+    wiki_context: str,
+    genre: str,
+    debug_raw: bool,
+) -> AsyncGenerator[tuple, None]:
+    """
+    manuscript_feedback 핵심 로직을 async generator로 감싸
+    SSE(stage, message, result) 튜플을 yield.
+    마지막 yield는 ("done", ..., final_result_dict).
+    """
+    yield ("progress", "설정 파일 로드 중...", None)
 
+    plot_config = await asyncio.get_running_loop().run_in_executor(
+        None, _load_plot_config_for, user_id, novel_id
+    )
+    world = _extract_world_from_plot(plot_config)
 
-@router.get(
-    "/world_setting",
-    summary="World/Plot Setting (Read)",
-    description="app/data/plot.json을 그대로 반환",
-)
-def get_world_setting():
-    try:
-        plot = _load_plot_config()
-        if not isinstance(plot, dict):
-            plot = {}
-        return {"plot": plot}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"plot load failed: {e}")
+    history = await asyncio.get_running_loop().run_in_executor(
+        None, _load_story_history_for, user_id, novel_id
+    )
+    character_config = await asyncio.get_running_loop().run_in_executor(
+        None, _load_character_config_for, user_id, novel_id
+    )
+    story_state = {"world": world, "history": history}
 
+    # ── 위키 컨텍스트 주입 ────────────────────────────────────────────────
+    wiki_items: list = []
+    if wiki_context:
+        try:
+            wiki_items = json.loads(wiki_context)
+        except Exception:
+            wiki_items = []
 
-@router.post(
-    "/world_setting",
-    summary="World/Plot Setting",
-    description="설정 입력 -> plot.json 갱신(PlotManager 내부 저장)",
-)
-def world_setting(text: str = Body(..., media_type="text/plain")):
-    try:
-        # ✅ 빈 값이면 삭제로 처리
-        if not (text or "").strip():
-            path = _data_path("plot.json")
-            plot = _safe_read_json(path)
-            if not isinstance(plot, dict):
-                plot = {}
+    if wiki_items:
+        existing_names = {
+            c.get("name", "").strip()
+            for c in character_config.get("characters", [])
+        }
+        for item in wiki_items:
+            if item.get("type") == "character" and item.get("title"):
+                name = item["title"].strip()
+                if name and name not in existing_names:
+                    character_config.setdefault("characters", []).append({
+                        "name": name,
+                        "description": item.get("description", ""),
+                    })
+                    existing_names.add(name)
 
-            plot["world_raw"] = ""
-            plot["summary"] = []
-            # 혹시 다른 키로 저장되는 케이스도 같이 비움(안전)
-            for k in ("world", "world_setting", "worldSettings", "settings", "setting", "global"):
-                v = plot.get(k)
-                if isinstance(v, dict):
-                    v.pop("world_raw", None)
-                    v.pop("summary", None)
+        wiki_world_lines = [
+            f"[{item.get('type', 'setting')}] {item['title']}: {item.get('description', '')}"
+            for item in wiki_items
+            if item.get("type") in ("world", "setting", "event", "theme", "location")
+            and item.get("title")
+        ]
+        if wiki_world_lines:
+            wiki_note = "\n\n[장기 기억 위키]\n" + "\n".join(wiki_world_lines)
+            existing_raw = plot_config.get("world_raw", "")
+            plot_config = {**plot_config, "world_raw": existing_raw + wiki_note}
+            world = _extract_world_from_plot(plot_config)
+            story_state["world"] = world
 
-            _safe_write_json(path, plot)
-            return {"status": "success", "message": "world cleared", "plot": plot}
+    yield ("progress", "회차 요약 저장 중...", None)
 
-        return manager.update_global_settings(text)
+    chunks = split_into_chunks(full_text_str)
+    await asyncio.get_running_loop().run_in_executor(
+        None,
+        lambda: ingest_episode(req=IngestEpisodeRequest(
+            episode_no=episode_no,
+            text_chunks=chunks,
+            user_id=user_id,
+            novel_id=novel_id,
+        )),
+    )
 
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    history_after = await asyncio.get_running_loop().run_in_executor(
+        None, _load_story_history_for, user_id, novel_id
+    )
+    story_state = {"world": world, "history": history_after}
 
+    yield ("progress", "이번 회차 팩트 추출 중...", None)
 
-class IngestRequest(BaseModel):
-    text: str
-    type: str  # "world" / "worldview" / etc
+    novel_manager = PlotManager(user_id=user_id, novel_id=novel_id)
+    episode_facts = await asyncio.get_running_loop().run_in_executor(
+        None,
+        lambda: novel_manager.extract_facts(episode_no, full_text_str, story_state),
+    )
+    if isinstance(episode_facts, dict):
+        episode_facts["raw_text"] = full_text_str
+    else:
+        episode_facts = {"raw_text": full_text_str}
 
+    yield ("progress", "세계관·캐릭터·플롯 검사 중 (병렬)...", None)
 
-@router.post(
-    "/ingest",
-    summary="Ingest Text",
-    description="프론트에서 변환된 텍스트를 받아 type에 따라 저장/요약 처리",
-)
-def ingest(payload: IngestRequest):
-    try:
-        text = (payload.text or "").strip()
-        upload_type = (payload.type or "").strip().lower()
+    issues = await asyncio.get_running_loop().run_in_executor(
+        None,
+        lambda: check_consistency(
+            episode_facts=episode_facts,
+            character_config=character_config,
+            plot_config=plot_config,
+            story_state=story_state,
+            genre=genre,
+        ),
+    )
 
-        if not text:
-            return {"status": "error", "message": "empty text"}
+    if not issues:
+        base: Dict[str, Any] = {"episode_no": episode_no, "message": "수정할 사안이 없습니다!", "issues": []}
+    else:
+        base = {"episode_no": episode_no, "issues": issues}
 
-        if upload_type in ("world", "worldview"):
-            res = manager.update_global_settings(text)
-            return {"status": "success", "message": "world ingested", "data": res}
+    if debug_raw:
+        base["debug"] = {
+            "cwd": os.getcwd(),
+            "history_path": core_paths.story_history_path(user_id, novel_id),
+            "full_text_len": len(full_text_str),
+            "plot_loaded": bool(plot_config),
+            "world_loaded": bool(world),
+            "history_loaded": bool(history_after),
+            "character_count": len(character_config.get("characters", [])) if isinstance(character_config, dict) else 0,
+            "issues_count": len(issues) if isinstance(issues, list) else 0,
+        }
 
-        return {"status": "error", "message": f"unsupported type: {upload_type}"}
-
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post(
-    "/character_setting",
-    summary="Character Setting",
-    description="캐릭터 설정 입력 -> 캐릭터 DB 업데이트",
-)
-def character_setting(name: str = Form(...), text: str = Form(...)):
-    try:
-        return _call_upsert_character(name=name, text=text)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    yield ("done", "분석 완료", base)
 
 
 @router.post(
     "/manuscript_feedback",
     summary="Manuscript Feedback",
-    description="원고 업로드 -> plot.json/characters.json/story_history.json과 비교 피드백",
+    description="원고 업로드 → 소설별 설정과 비교해 피드백 반환. stream=true 시 SSE 스트리밍.",
 )
-def manuscript_feedback(
+async def manuscript_feedback(
     episode_no: int,
+    novel_id: str = Query(..., description="현재 소설 ID"),
     text: str = Body(..., media_type="text/plain"),
     debug_raw: bool = Query(False, description="디버그 정보를 포함할지"),
+    wiki_context: str = Query("", description="JSON-encoded wiki items (장기 기억 위키)"),
+    stream: bool = Query(False, description="SSE 스트리밍 여부"),
+    genre: str = Query("", description="소설 장르 (회귀/빙의/로판/판타지 등)"),
+    user_id: str = Depends(get_current_user_id),
 ):
-    try:
-        full_text_str = text or ""
-        if not full_text_str.strip():
-            raise ValueError("원고가 비어있습니다.")
+    full_text_str = (text or "").strip()
+    if not full_text_str:
+        raise HTTPException(status_code=400, detail="원고 내용이 비어 있습니다. 내용을 입력한 후 다시 시도해주세요.")
 
-        plot_config = _load_plot_config()
-        world = _extract_world_from_plot(plot_config)
+    pipeline_kwargs = dict(
+        episode_no=episode_no,
+        full_text_str=full_text_str,
+        novel_id=novel_id,
+        user_id=user_id,
+        wiki_context=wiki_context,
+        genre=genre,
+        debug_raw=debug_raw,
+    )
 
-        history = _load_story_history()
-        character_config = _load_character_config()
-        story_state = {"world": world, "history": history}
+    if stream:
+        async def _generate_sse():
+            try:
+                async for stage, message, result in _run_manuscript_pipeline(**pipeline_kwargs):
+                    if stage == "done":
+                        yield _sse_event("done", result)
+                    else:
+                        yield _sse_event("progress", {"stage": stage, "message": message})
+            except Exception as e:
+                logger.exception("manuscript_feedback SSE 파이프라인 오류")
+                yield _sse_event("error", {"message": _user_friendly_error(e)})
 
-        chunks = split_into_chunks(full_text_str)
-
-        ingest_episode(req=IngestEpisodeRequest(episode_no=episode_no, text_chunks=chunks))
-
-        history_after = _load_story_history()
-        story_state = {"world": world, "history": history_after}
-
-        episode_facts = manager.extract_facts(episode_no, full_text_str, story_state)
-        if isinstance(episode_facts, dict):
-            episode_facts["raw_text"] = full_text_str
-        else:
-            episode_facts = {"raw_text": full_text_str}
-
-        issues = check_consistency(
-            episode_facts=episode_facts,
-            character_config=character_config,
-            plot_config=plot_config,
-            story_state=story_state,
+        return StreamingResponse(
+            _generate_sse(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-        if not issues:
-            base = {"episode_no": episode_no, "message": "수정할 사안이 없습니다!", "issues": []}
-        else:
-            base = {"episode_no": episode_no, "issues": issues}
-
-        if debug_raw:
-            base["debug"] = {
-                "cwd": os.getcwd(),
-                "history_path": _data_path("story_history.json"),
-                "full_text_len": len(full_text_str),
-                "plot_loaded": bool(plot_config),
-                "world_loaded": bool(world),
-                "history_loaded": bool(history_after),
-                "character_count": len(character_config.get("characters", [])) if isinstance(character_config, dict) else 0,
-                "issues_count": len(issues) if isinstance(issues, list) else 0,
-            }
-
-        return base
-
+    # 논-스트리밍: 최종 결과만 반환
+    try:
+        final_result: Dict[str, Any] = {}
+        async for stage, message, result in _run_manuscript_pipeline(**pipeline_kwargs):
+            if stage == "done" and result is not None:
+                final_result = result
+        return final_result
     except ValidationError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
+        raise HTTPException(status_code=422, detail=f"요청 형식 오류: {str(ve)}")
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.exception("manuscript_feedback 파이프라인 오류")
+        raise HTTPException(status_code=500, detail=_user_friendly_error(e))
+
+
+def _user_friendly_error(e: Exception) -> str:
+    """예외를 사용자 친화적 메시지로 변환"""
+    msg = str(e)
+    if "API" in msg or "api" in msg or "key" in msg.lower():
+        return "AI 서비스 연결에 문제가 발생했습니다. 잠시 후 다시 시도해주세요."
+    if "timeout" in msg.lower() or "timed out" in msg.lower():
+        return "분석 시간이 초과되었습니다. 원고를 더 짧게 나누어 시도해보세요."
+    if "memory" in msg.lower() or "oom" in msg.lower():
+        return "메모리 부족으로 분석에 실패했습니다. 원고 길이를 줄여보세요."
+    if "empty" in msg.lower() or "비어" in msg:
+        return msg
+    return f"분석 중 오류가 발생했습니다. 원고 내용을 확인하고 다시 시도해주세요. (오류: {msg[:100]})"

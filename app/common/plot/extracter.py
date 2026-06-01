@@ -1,6 +1,6 @@
 import os
 import json
-from langchain_upstage import ChatUpstage
+from app.core.llm import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from dotenv import load_dotenv
@@ -10,7 +10,7 @@ load_dotenv()
 
 class PlotManager:
     def __init__(self):
-        self.llm = ChatUpstage(model="solar-pro")
+        self.llm = get_llm(temperature=0.2)
         self.parser = JsonOutputParser()
         self.output_file = "plot.json"
 

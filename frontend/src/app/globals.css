@@ -1,0 +1,225 @@
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Nanum+Gothic:wght@400;700&family=Nanum+Myeongjo:wght@400;700&family=Gothic+A1:wght@400;500;700&family=Noto+Serif+KR:wght@400;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Notion 색상 CSS 변수 (라이트 / 다크) ─────────────────────────────── */
+:root {
+  --color-notion-bg: #ffffff;
+  --color-notion-bg-secondary: #f7f7f5;
+  --color-notion-text: #37352f;
+  --color-notion-text-secondary: #9b9a97;
+  --color-notion-border: #e9e9e7;
+}
+
+.dark {
+  --color-notion-bg: #111111;
+  --color-notion-bg-secondary: #1c1c1c;
+  --color-notion-text: #f0eeeb;
+  --color-notion-text-secondary: #5c5a58;
+  --color-notion-border: #2d2d2b;
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+@layer base {
+  html {
+    @apply antialiased;
+  }
+
+  body {
+    @apply bg-notion-bg text-notion-text font-sans;
+  }
+
+  ::selection {
+    @apply bg-moneta-light;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-notion-border rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-notion-text-secondary;
+  }
+}
+
+/* ── TipTap Editor ───────────────────────────────────────────────────────── */
+@layer components {
+  .tiptap-editor {
+    @apply outline-none min-h-[60vh];
+    font-size: 1.0625rem;   /* 17px — 한국어 가독성 최적 */
+    line-height: 2.1;
+    color: var(--color-notion-text);
+    word-break: keep-all;   /* 한국어 단어 단위 줄바꿈 */
+    letter-spacing: -0.01em;
+  }
+
+  .tiptap-editor p {
+    margin-top: 0.15em;
+    margin-bottom: 0.85em;  /* 단락 간격 확대 */
+  }
+
+  /* 빈 단락 (엔터 구분) 높이 보장 */
+  .tiptap-editor p:empty::after,
+  .tiptap-editor p br:only-child {
+    content: "";
+    display: inline-block;
+  }
+
+  .tiptap-editor h1 {
+    @apply text-3xl font-bold mt-8 mb-3;
+  }
+
+  .tiptap-editor h2 {
+    @apply text-2xl font-bold mt-6 mb-2;
+  }
+
+  .tiptap-editor h3 {
+    @apply text-xl font-semibold mt-5 mb-2;
+  }
+
+  .tiptap-editor ul {
+    @apply list-disc pl-6 my-2;
+  }
+
+  .tiptap-editor ol {
+    @apply list-decimal pl-6 my-2;
+  }
+
+  .tiptap-editor blockquote {
+    @apply border-l-4 border-notion-border pl-4 text-notion-text-secondary italic my-4;
+  }
+
+  .tiptap-editor code {
+    @apply bg-notion-bg-secondary px-1 py-0.5 rounded text-sm font-mono;
+  }
+
+  .tiptap-editor pre {
+    @apply bg-notion-bg-secondary p-4 rounded-lg my-4 overflow-x-auto;
+  }
+
+  .tiptap-editor pre code {
+    @apply bg-transparent p-0;
+  }
+
+  .tiptap-editor hr {
+    @apply border-notion-border my-6;
+  }
+
+  .tiptap-editor mark {
+    @apply bg-yellow-100 rounded px-0.5;
+  }
+
+  /* Placeholder */
+  .tiptap-editor p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    @apply text-notion-text-secondary pointer-events-none float-left h-0;
+  }
+
+  /* Focus ring for title */
+  .episode-title:focus {
+    @apply outline-none;
+  }
+
+  /* ── TipTap Table ───────────────────────────────────────────────────────── */
+  .tiptap-editor table {
+    border-collapse: collapse;
+    table-layout: fixed;
+    width: 100%;
+    margin: 1.25em 0;
+    overflow: hidden;
+    border-radius: 6px;
+  }
+
+  .tiptap-editor table td,
+  .tiptap-editor table th {
+    min-width: 1.5em;
+    border: 1px solid var(--color-notion-border);
+    padding: 0.45em 0.75em;
+    vertical-align: top;
+    box-sizing: border-box;
+    position: relative;
+    font-size: 0.9375rem;
+  }
+
+  .tiptap-editor table th {
+    background-color: var(--color-notion-bg-secondary);
+    font-weight: 600;
+    text-align: left;
+  }
+
+  .tiptap-editor table .selectedCell:after {
+    z-index: 2;
+    position: absolute;
+    content: "";
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    background: rgba(99, 102, 241, 0.12);
+    pointer-events: none;
+  }
+
+  .tiptap-editor table .column-resize-handle {
+    position: absolute;
+    right: -2px;
+    top: 0;
+    bottom: -2px;
+    width: 4px;
+    background-color: #6366f1;
+    pointer-events: none;
+  }
+
+  .tiptap-editor .tableWrapper {
+    overflow-x: auto;
+    margin: 1em 0;
+  }
+
+  .tiptap-editor .resize-cursor {
+    cursor: ew-resize;
+    cursor: col-resize;
+  }
+
+  /* ── TipTap Image ───────────────────────────────────────────────────────── */
+  .tiptap-editor img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+    margin: 0.5em 0;
+    display: block;
+  }
+
+  .tiptap-editor img.ProseMirror-selectednode {
+    outline: 2px solid #6366f1;
+    outline-offset: 2px;
+  }
+}
+
+/* ── Dark mode overrides ─────────────────────────────────────────────────── */
+/* CSS 변수 기반이므로 대부분 자동 전환됨; 일부 하드코딩된 값만 오버라이드 */
+@layer components {
+  /* mark(형광펜)은 다크모드에서 어두운 황색으로 */
+  .dark .tiptap-editor mark {
+    background-color: rgba(234, 179, 8, 0.25);
+    color: inherit;
+  }
+
+  /* 코드블록 다크모드 */
+  .dark .tiptap-editor code,
+  .dark .tiptap-editor pre {
+    background-color: var(--color-notion-bg-secondary);
+  }
+
+  /* 선택 색상 다크모드 */
+  .dark ::selection {
+    background-color: rgba(124, 58, 237, 0.35);
+  }
+}

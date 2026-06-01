@@ -26,7 +26,7 @@ def ingest_episode(
 
     try:
         from app.service.story_keeper_agent.load_state.extracter import PlotManager
-        manager = PlotManager()
+        manager = PlotManager(user_id=req.user_id, novel_id=req.novel_id)
         res = manager.summarize_and_save(req.episode_no, full_text)
         if res.get("status") != "success":
             raise IngestEpisodeError("story_history 저장 실패")

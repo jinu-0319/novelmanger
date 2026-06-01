@@ -4,10 +4,8 @@ from chromadb.config import Settings
 from typing import List, Dict, Any
 
 # Solar 임베딩 라이브러리
-from langchain_upstage import UpstageEmbeddings
+from app.core.llm import get_embeddings
 
-# [변경 1] 로컬 경로 설정 삭제
-# CHROMA_DB_PATH = ... (삭제)
 COLLECTION_NAME = "history_collection"
 
 # 전역 클라이언트 (재연결 방지)
@@ -18,7 +16,7 @@ class ManuscriptRepository:
         global _shared_client
 
         # 1. 임베딩 함수 생성
-        self.embedding_function = UpstageEmbeddings(model="solar-embedding-1-large")
+        self.embedding_function = get_embeddings()
 
         if _shared_client is None:
             # [변경 2] 환경변수에서 호스트/포트 가져오기
