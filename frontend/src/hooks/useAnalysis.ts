@@ -50,22 +50,18 @@ export function useAnalysis() {
         let result: AnalysisResult;
 
         if (type === "story_keeper") {
-          const onProgress = (_stage: string, message: string) => {
-            setStates((prev) => ({
-              ...prev,
-              story_keeper: { ...prev.story_keeper, progressMessage: message },
-            }));
-          };
+          // Next.js rewrite가 SSE 스트리밍을 프록시하지 못하는 문제로
+          // onProgress(스트리밍) 대신 비스트리밍 모드로 호출
           result = await analyzeStoryKeeper(
             html,
             opts.episodeNo ?? 1,
             wiki,
             opts.novelId,
             opts.genre,
-            onProgress,
+            undefined,   // onProgress 비활성화 → stream=false
           );
         } else {
-          result = await analyzeClio(html, opts.docTitle ?? "원고", wiki);
+          result = await analyzeClio(html, opts.docTitle ?? "원고", wiki, opts.novelId);
         }
 
         setStates((prev) => ({

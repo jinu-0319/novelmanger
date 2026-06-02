@@ -135,6 +135,7 @@ function StoryKeeperSection({
 function ClioSection({ getContent, docTitle }: { getContent: () => string; docTitle: string }) {
   const { states, run, clear } = useAnalysis();
   const getWiki = useStore((s) => s.getWiki);
+  const novelId = useStore((s) => s.activeNovelId) ?? undefined;
   const state = states.clio;
 
   return (
@@ -158,6 +159,7 @@ function ClioSection({ getContent, docTitle }: { getContent: () => string; docTi
           const wiki = getWiki();
           run("clio", html, {
             docTitle,
+            novelId,
             wikiContext: wiki.map((w) => ({ type: w.type, title: w.title, description: w.description })),
           });
         }}

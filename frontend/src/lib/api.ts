@@ -501,18 +501,20 @@ export async function analyzeStoryKeeper(
  * Clio 팩트체크 분석
  * 백엔드: POST /manuscript/analyze
  * Content-Type: multipart/form-data
- * Fields: title (Form 필수), file (UploadFile 필수)
+ * Fields: novel_id (Form), title (Form), file (UploadFile)
  */
 export async function analyzeClio(
   html: string,
   title = "원고",
-  wikiContext: WikiContextItem[] = []
+  wikiContext: WikiContextItem[] = [],
+  novelId?: string,
 ): Promise<AnalysisResult> {
   const text = stripHtml(html);
   if (!text.trim()) return { items: [] };
 
   const formData = new FormData();
-  formData.append("title", title);           // ← 백엔드 필수 Form 필드
+  formData.append("novel_id", novelId ?? "");   // 백엔드 필수 Form 필드
+  formData.append("title", title);
   formData.append(
     "file",
     new Blob([text], { type: "text/plain" }),
@@ -525,6 +527,7 @@ export async function analyzeClio(
 
   const res = await fetch(`${BASE}/manuscript/analyze`, {
     method: "POST",
+    headers: { ...authHeader() },   // 인증 헤더 추가
     body: formData,
   });
 

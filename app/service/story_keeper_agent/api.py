@@ -229,7 +229,7 @@ async def _run_manuscript_pipeline(
 )
 async def manuscript_feedback(
     episode_no: int,
-    novel_id: str = Query(..., description="현재 소설 ID"),
+    novel_id: str = Query("", description="현재 소설 ID (선택)"),
     text: str = Body(..., media_type="text/plain"),
     debug_raw: bool = Query(False, description="디버그 정보를 포함할지"),
     wiki_context: str = Query("", description="JSON-encoded wiki items (장기 기억 위키)"),

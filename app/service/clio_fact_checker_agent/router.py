@@ -22,7 +22,7 @@ def _build_analyzer(user_id: str, novel_id: str, extra_fiction_terms: list[str])
 
 @router.post("/analyze")
 async def analyze_manuscript_file(
-    novel_id: str = Form(..., description="분석 대상 소설 ID"),
+    novel_id: str = Form("", description="분석 대상 소설 ID (선택)"),
     title: str = Form(...),
     file: UploadFile = File(...),
     wiki_context: str = Form("", description="JSON-encoded wiki items (장기 기억 위키)"),
@@ -66,7 +66,9 @@ async def analyze_manuscript_file(
     # 이벤트 루프 차단을 피하기 위해 ThreadPoolExecutor에서 실행
     try:
         loop = asyncio.get_running_loop()
-        analyzer = _build_analyzer(user_id, novel_id, extra_fiction_terms)
+        # novel_id가 없으면 빈 설정으로 분석 (허구 필터 없이 동작)
+        effective_novel_id = novel_id if novel_id else "__default__"
+        analyzer = _build_analyzer(user_id, effective_novel_id, extra_fiction_terms)
         result = await loop.run_in_executor(
             None, analyzer.analyze_manuscript, real_text
         )
