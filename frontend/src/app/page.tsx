@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { useAuthStore } from "@/store/useAuthStore";
 
 // ── 기능 카드 데이터 ───────────────────────────────────────────────────────────
@@ -62,7 +63,14 @@ const STEPS = [
 
 export default function LandingPage() {
   const router = useRouter();
-  const token = useAuthStore((s) => s.token);
+  const tokenFromStore = useAuthStore((s) => s.token);
+
+  // Zustand persist 하이드레이션 불일치 방지:
+  // 서버는 항상 token=null, 클라이언트는 localStorage 복원값 → 불일치 발생
+  // mounted 전까지 null 로 고정해 서버·클라이언트를 동일하게 유지
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const token = mounted ? tokenFromStore : null;
 
   function handleStart() {
     if (token) {

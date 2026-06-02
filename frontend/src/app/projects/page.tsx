@@ -143,7 +143,7 @@ function NovelCard({ novel, onOpen, onDelete, onCoverChange }: {
           ))}
           <span className="text-xs text-notion-text-secondary">{episodeCount}화</span>
           {novel.updated_at && (
-            <span className="text-xs text-notion-text-secondary ml-auto">
+            <span suppressHydrationWarning className="text-xs text-notion-text-secondary ml-auto">
               {timeAgo(novel.updated_at)}
             </span>
           )}
@@ -290,6 +290,12 @@ export default function ProjectsPage() {
   const { novels, addNovel, updateNovel, deleteNovel, setActiveNovel } = useStore();
   const [showModal, setShowModal] = useState(false);
 
+  // Zustand persist 하이드레이션 불일치 방지
+  // 서버(기본값)와 클라이언트(localStorage 복원값)가 다르므로
+  // 마운트 전까지는 렌더링을 보류합니다.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   // 로그인 시 서버 소설 목록과 로컬 상태 동기화
   useEffect(() => {
     getNovels().then((serverNovels) => {
@@ -341,6 +347,9 @@ export default function ProjectsPage() {
     logout();
     router.push("/login");
   }
+
+  // 하이드레이션 완료 전: 빈 화면(레이아웃 유지)
+  if (!mounted) return <div className="min-h-screen bg-notion-bg-secondary" />;
 
   return (
     <>
