@@ -757,7 +757,8 @@ export async function getNovelCharacters(novelId: string): Promise<Character[]> 
       headers: authHeader(),
     });
     if (!res.ok) return [];
-    return (await res.json()) as Character[];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
   } catch {
     return [];
   }
@@ -849,7 +850,8 @@ export async function getNovelMaterials(novelId: string): Promise<Material[]> {
       headers: authHeader(),
     });
     if (!res.ok) return [];
-    return (await res.json()) as Material[];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
   } catch {
     return [];
   }
@@ -996,7 +998,8 @@ export async function getBoards(novelId: string): Promise<PlotBoard[]> {
       headers: authHeader(),
     });
     if (!res.ok) return [];
-    return (await res.json()) as PlotBoard[];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
   } catch {
     return [];
   }
