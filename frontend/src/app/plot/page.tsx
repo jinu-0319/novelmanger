@@ -6,6 +6,7 @@ import { useStore } from "@/store/useStore";
 import {
   getBoards,
   createBoard,
+  createNovelOnServer,
   updateBoard,
   deleteBoard,
   type PlotBoard,
@@ -376,6 +377,7 @@ function KanbanColumn({ column, onUpdate, onDelete, onDragStart, onDrop }: Colum
 
 function PlotContent() {
   const activeNovelId = useStore((s) => s.activeNovelId);
+  const activeNovel   = useStore((s) => s.getActiveNovel());
 
   const [boards, setBoards] = useState<PlotBoard[]>([]);
   const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
@@ -383,6 +385,7 @@ function PlotContent() {
   const [saving, setSaving] = useState(false);
   const [newBoardTitle, setNewBoardTitle] = useState("");
   const [showNewBoard, setShowNewBoard] = useState(false);
+  const [boardError, setBoardError] = useState<string | null>(null);
 
   // Drag state
   const dragCard = useRef<{ cardId: string; fromColumnId: string } | null>(null);
@@ -437,13 +440,29 @@ function PlotContent() {
   async function handleCreateBoard() {
     const title = newBoardTitle.trim() || "새 보드";
     if (!activeNovelId) return;
+    setBoardError(null);
+
+    // 백엔드에 소설이 없을 경우 자동 생성 (로컬 상태와 서버 동기화)
+    if (activeNovel) {
+      await createNovelOnServer({
+        id: activeNovel.id,
+        title: activeNovel.title,
+        genre: activeNovel.genre,
+        description: activeNovel.description,
+        cover_color: activeNovel.cover_color,
+        cover_image: activeNovel.cover_image,
+      }).catch(() => {/* 이미 있으면 멱등 처리 */});
+    }
+
     const created = await createBoard(activeNovelId, { title, columns: [] });
     if (created) {
       setBoards((prev) => [...prev, created]);
       setActiveBoardId(created.id);
+      setNewBoardTitle("");
+      setShowNewBoard(false);
+    } else {
+      setBoardError("보드 생성에 실패했습니다. 잠시 후 다시 시도해주세요.");
     }
-    setNewBoardTitle("");
-    setShowNewBoard(false);
   }
 
   async function handleDeleteBoard(boardId: string) {
@@ -575,13 +594,16 @@ function PlotContent() {
 
         {/* New board */}
         <div className="p-3 border-t border-notion-border">
+          {boardError && (
+            <p className="text-xs text-red-500 mb-2 px-1">{boardError}</p>
+          )}
           {showNewBoard ? (
             <div className="space-y-2">
               <input
                 autoFocus
                 value={newBoardTitle}
                 onChange={(e) => setNewBoardTitle(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") handleCreateBoard(); if (e.key === "Escape") setShowNewBoard(false); }}
+                onKeyDown={(e) => { if (e.key === "Enter") handleCreateBoard(); if (e.key === "Escape") { setShowNewBoard(false); setBoardError(null); } }}
                 placeholder="보드 제목"
                 className="w-full border border-notion-border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
               />
@@ -593,7 +615,7 @@ function PlotContent() {
                   추가
                 </button>
                 <button
-                  onClick={() => setShowNewBoard(false)}
+                  onClick={() => { setShowNewBoard(false); setBoardError(null); }}
                   className="px-2 py-1.5 text-xs text-notion-text-secondary hover:text-notion-text transition-colors"
                 >
                   취소
