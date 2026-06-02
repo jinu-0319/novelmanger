@@ -23,7 +23,6 @@ interface DocRowProps {
   doc: Document;
   isActive: boolean;
   isRenaming: boolean;
-  renameRef: React.RefObject<HTMLInputElement>;
   onCommitRename: (doc: Document, title: string) => void;
   onCancelRename: () => void;
   onContextMenu: (e: React.MouseEvent, docId: string) => void;
@@ -33,9 +32,21 @@ interface DocRowProps {
 }
 
 function DocRow({
-  doc, isActive, isRenaming, renameRef, onCommitRename, onCancelRename,
+  doc, isActive, isRenaming, onCommitRename, onCancelRename,
   onContextMenu, onDragStart, onClick, indent,
 }: DocRowProps) {
+  // 각 행이 자체 ref를 갖고, isRenaming이 true가 되면 즉시 포커스
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!isRenaming) return;
+    const timer = setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }, 30);
+    return () => clearTimeout(timer);
+  }, [isRenaming]);
+
   return (
     <div
       draggable
@@ -55,7 +66,7 @@ function DocRow({
       </span>
       {isRenaming ? (
         <input
-          ref={renameRef}
+          ref={inputRef}
           defaultValue={doc.title}
           className="bg-white/10 text-white text-sm flex-1 px-1 rounded outline-none min-w-0"
           placeholder="제목 입력..."
@@ -191,7 +202,6 @@ export default function Sidebar({ projectName }: Props) {
   const [movingDocId, setMovingDocId] = useState<string | null>(null);
 
   const [renaming, setRenaming] = useState<string | null>(null);
-  const renameRef = useRef<HTMLInputElement>(null);
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
   const folderRenameRef = useRef<HTMLInputElement>(null);
 
@@ -262,11 +272,8 @@ export default function Sidebar({ projectName }: Props) {
     };
     upsertDocument(newDoc);
     router.push(`/editor?doc=${id}`);
-    // 바로 이름 수정 모드로 진입
-    setTimeout(() => {
-      setRenaming(id);
-      setTimeout(() => renameRef.current?.focus(), 50);
-    }, 80);
+    // DocRow의 useEffect가 isRenaming=true를 감지하면 자동으로 포커스
+    setRenaming(id);
   }
 
   function handleDelete(docId: string) {
@@ -283,7 +290,7 @@ export default function Sidebar({ projectName }: Props) {
   function startRename(docId: string) {
     setRenaming(docId);
     setContextMenu(null);
-    setTimeout(() => renameRef.current?.focus(), 50);
+    // DocRow의 useEffect가 자동으로 포커스 처리
   }
 
   function commitRename(doc: Document, title: string) {
@@ -410,7 +417,6 @@ export default function Sidebar({ projectName }: Props) {
         doc={doc}
         isActive={activeDocId === doc.id}
         isRenaming={renaming === doc.id}
-        renameRef={renameRef}
         onCommitRename={commitRename}
         onCancelRename={() => setRenaming(null)}
         onContextMenu={(e, id) => setContextMenu({ docId: id, x: e.clientX, y: e.clientY })}
