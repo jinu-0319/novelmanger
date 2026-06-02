@@ -405,7 +405,13 @@ const NovelEditor = forwardRef<NovelEditorRef, Props>(function NovelEditor({ doc
     },
     onUpdate: ({ editor }) => {
       const html = editor.getHTML();
-      setPendingDoc((prev) => ({ ...prev, ...doc, content: html }));
+      // novel_id를 doc에서 이어받아 백엔드 저장 경로에 사용
+      setPendingDoc((prev) => ({
+        ...prev,
+        ...doc,
+        novel_id: doc.novel_id ?? activeNovel?.id,
+        content: html,
+      }));
     },
     immediatelyRender: false,
   });

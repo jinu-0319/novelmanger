@@ -27,6 +27,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+# frontend/src/lib 은 소스코드이므로 제외 대상에서 명시적으로 허용
+!frontend/src/lib/
 parts/
 sdist/
 var/

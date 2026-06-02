@@ -265,6 +265,7 @@ export default function Sidebar({ projectName }: Props) {
     const id = `doc-${Date.now()}`;
     const newDoc: Document = {
       id,
+      novel_id: activeNovel?.id,
       episode_no: nextEp,
       title: "새 문서",
       content: "",

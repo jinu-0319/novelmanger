@@ -44,6 +44,7 @@ from app.core.paths import (
     material_path,
     novel_dir,
     plot_boards_path,
+    episodes_path,
 )
 
 router = APIRouter(prefix="/novels", tags=["Novels"])
@@ -326,6 +327,69 @@ def get_story_history(novel_id: str, user_id: str = Depends(get_current_user_id)
     data = _read(story_history_path(user_id, novel_id), default={})
     # { "1": { summary, title, ... }, ... } 형태 반환
     return {"history": data}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 에피소드 (회차 원고 저장)
+# ══════════════════════════════════════════════════════════════════════════
+
+class EpisodeBody(BaseModel):
+    id: str
+    episode_no: int = 1
+    title: str = ""
+    content: str = ""
+    folder_id: Optional[str] = None
+
+
+@router.get("/{novel_id}/episodes", summary="에피소드 목록")
+def list_episodes(novel_id: str, user_id: str = Depends(get_current_user_id)):
+    _assert_novel(user_id, novel_id)
+    data = _read(episodes_path(user_id, novel_id), default={})
+    return list(data.values()) if isinstance(data, dict) else []
+
+
+@router.post("/{novel_id}/episodes", summary="에피소드 저장/수정", status_code=200)
+def save_episode(
+    novel_id: str,
+    body: EpisodeBody,
+    user_id: str = Depends(get_current_user_id),
+):
+    _assert_novel(user_id, novel_id)
+    p = episodes_path(user_id, novel_id)
+
+    with _get_lock(f"{user_id}/{novel_id}/episodes"):
+        data: Dict[str, Any] = _read(p, default={})
+        if not isinstance(data, dict):
+            data = {}
+        data[body.id] = {
+            "id":         body.id,
+            "episode_no": body.episode_no,
+            "title":      body.title,
+            "content":    body.content,
+            "folder_id":  body.folder_id,
+            "updated_at": _now(),
+        }
+        _write(p, data)
+
+    return {"status": "ok", "id": body.id}
+
+
+@router.delete("/{novel_id}/episodes/{doc_id}", summary="에피소드 삭제")
+def delete_episode(
+    novel_id: str,
+    doc_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    _assert_novel(user_id, novel_id)
+    p = episodes_path(user_id, novel_id)
+
+    with _get_lock(f"{user_id}/{novel_id}/episodes"):
+        data: Dict[str, Any] = _read(p, default={})
+        if isinstance(data, dict):
+            data.pop(doc_id, None)
+            _write(p, data)
+
+    return {"status": "ok"}
 
 
 # ══════════════════════════════════════════════════════════════════════════

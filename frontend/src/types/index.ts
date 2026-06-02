@@ -1,9 +1,10 @@
 export interface Document {
   id: string;
+  novel_id?: string;          // 속한 소설 ID (저장/동기화용)
   episode_no: number;
   title: string;
   content: string;
-  folder_id?: string | null; // 속한 폴더 ID (없으면 미분류)
+  folder_id?: string | null;  // 속한 폴더 ID (없으면 미분류)
   created_at?: string;
   updated_at?: string;
 }

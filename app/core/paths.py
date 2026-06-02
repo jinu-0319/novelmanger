@@ -68,3 +68,7 @@ def plot_boards_path(user_id: str, novel_id: str) -> str:
 
 def wiki_path(user_id: str, novel_id: str) -> str:
     return _ensure(os.path.join(novel_dir(user_id, novel_id), "wiki.json"))
+
+
+def episodes_path(user_id: str, novel_id: str) -> str:
+    return _ensure(os.path.join(novel_dir(user_id, novel_id), "episodes.json"))
