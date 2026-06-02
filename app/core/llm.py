@@ -3,14 +3,28 @@ app/core/llm.py — 중앙 LLM/임베딩 팩토리
 
 모델 교체 시 이 파일만 수정하면 전체 적용됩니다.
   분석 (Story Keeper, Clio) : Google Gemini 2.5 Flash
-  임베딩 (ChromaDB)         : Google text-embedding-004
+  임베딩 (ChromaDB)         : Google text-embedding-004  ← 패키지 업그레이드 후 사용 가능
   플롯 생성                  : OpenAI GPT-4o  (plot 모듈에서 직접 사용)
+
+[임베딩 모델 선택 기준]
+  google-generativeai >= 0.8.x + langchain-google-genai 4.x 조합에서
+  text-embedding-004는 v1beta 엔드포인트에서 지원되지 않아 404 오류 발생.
+
+  해결 방법 (둘 중 하나):
+    A) 패키지 업그레이드:
+       .venv\\Scripts\\pip.exe install --upgrade google-generativeai langchain-google-genai
+       → 업그레이드 후 EMBEDDING_MODEL = "models/text-embedding-004" 로 변경
+    B) 현재: v1beta 호환 모델인 models/embedding-001 사용
 """
 
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# ── 모델 설정 ─────────────────────────────────────────────────────────────────
+# 패키지 업그레이드 후 "models/text-embedding-004" 으로 변경하세요
+EMBEDDING_MODEL = "models/embedding-001"
 
 
 def get_llm(temperature: float = 0.3):
@@ -24,14 +38,13 @@ def get_llm(temperature: float = 0.3):
 
 
 def get_embeddings():
-    """임베딩 모델 — Google text-embedding-004
+    """임베딩 모델 — Google Generative AI Embeddings
 
-    langchain_google_genai 구버전은 v1beta 엔드포인트를 사용해
-    text-embedding-004를 찾지 못함.
-    'models/' 접두사 없이 전달하면 내부적으로 v1 경로를 사용해 해결됨.
+    현재: models/embedding-001 (v1beta 호환, 768차원)
+    목표: models/text-embedding-004 (패키지 업그레이드 후 EMBEDDING_MODEL 상수 변경)
     """
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
     return GoogleGenerativeAIEmbeddings(
-        model="text-embedding-004",          # 'models/' 접두사 제거
+        model=EMBEDDING_MODEL,
         google_api_key=os.getenv("GEMINI_API_KEY"),
     )
