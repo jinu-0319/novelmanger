@@ -293,7 +293,8 @@ export default function ProjectsPage() {
   // 로그인 시 서버 소설 목록과 로컬 상태 동기화
   useEffect(() => {
     getNovels().then((serverNovels) => {
-      if (serverNovels.length === 0) return;
+      // 배열이 아닌 응답(인증 오류 등)은 무시
+      if (!Array.isArray(serverNovels) || serverNovels.length === 0) return;
       // 서버에만 있는 소설을 로컬에 추가 (ID 기준)
       const localIds = new Set(novels.map((n) => n.id));
       serverNovels.forEach((sn) => {

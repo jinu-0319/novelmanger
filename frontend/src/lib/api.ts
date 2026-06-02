@@ -710,7 +710,9 @@ export async function getNovels(): Promise<NovelServerData[]> {
   try {
     const res = await fetch(`${BASE}/novels`, { headers: authHeader() });
     if (!res.ok) return [];
-    return (await res.json()) as NovelServerData[];
+    const data = await res.json();
+    // 백엔드가 배열 대신 오류 객체를 반환하는 경우 방어
+    return Array.isArray(data) ? data : [];
   } catch {
     return [];
   }
