@@ -428,6 +428,10 @@ const NovelEditor = forwardRef<NovelEditorRef, Props>(function NovelEditor({ doc
     if (!editor) return;
     if (editor.getHTML() !== doc.content) editor.commands.setContent(doc.content, false);
     setTitle(doc.title);
+    // contentEditable은 React 상태 변경만으로 DOM이 갱신되지 않으므로 직접 업데이트
+    if (titleRef.current) {
+      titleRef.current.textContent = doc.title || "";
+    }
     setPendingDoc(null);
   }, [doc.id]); // eslint-disable-line
 
@@ -613,7 +617,7 @@ const NovelEditor = forwardRef<NovelEditorRef, Props>(function NovelEditor({ doc
             suppressContentEditableWarning
             onBlur={handleTitleBlur}
             className="text-[2.25rem] font-bold text-notion-text mb-10 outline-none episode-title leading-tight empty:before:content-[attr(placeholder)] empty:before:text-notion-text-secondary empty:before:font-normal"
-            data-placeholder="제목을 입력하세요"
+            data-placeholder="새 문서"
             style={{ fontFamily: font.value }}
           >
             {title}

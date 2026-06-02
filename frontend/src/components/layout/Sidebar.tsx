@@ -266,7 +266,7 @@ export default function Sidebar({ projectName }: Props) {
     const newDoc: Document = {
       id,
       episode_no: nextEp,
-      title: "",
+      title: "새 문서",
       content: "",
       folder_id: folderId ?? null,
     };
