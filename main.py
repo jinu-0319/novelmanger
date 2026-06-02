@@ -74,6 +74,7 @@ app.include_router(history_router)
 app.include_router(story_keeper_router)
 
 
+@app.get("/", tags=["Health"])
 @app.get("/health", tags=["Health"])
 def health_check():
     return {"status": "ok", "version": "1.0.0"}

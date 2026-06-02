@@ -24,9 +24,14 @@ def get_llm(temperature: float = 0.3):
 
 
 def get_embeddings():
-    """임베딩 모델 — Google text-embedding-004"""
+    """임베딩 모델 — Google text-embedding-004
+
+    langchain_google_genai 구버전은 v1beta 엔드포인트를 사용해
+    text-embedding-004를 찾지 못함.
+    'models/' 접두사 없이 전달하면 내부적으로 v1 경로를 사용해 해결됨.
+    """
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
     return GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004",
+        model="text-embedding-004",          # 'models/' 접두사 제거
         google_api_key=os.getenv("GEMINI_API_KEY"),
     )
