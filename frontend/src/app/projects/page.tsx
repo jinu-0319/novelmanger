@@ -132,14 +132,15 @@ function NovelCard({ novel, onOpen, onDelete, onCoverChange }: {
         )}
 
         <div className="flex items-center gap-2 flex-wrap mt-3">
-          {novel.genre && (
+          {novel.genre && novel.genre.split(" · ").map((g) => (
             <span
+              key={g}
               className="text-xs px-2 py-0.5 rounded-full text-white font-medium"
               style={{ backgroundColor: novel.cover_color }}
             >
-              {novel.genre}
+              {g}
             </span>
-          )}
+          ))}
           <span className="text-xs text-notion-text-secondary">{episodeCount}화</span>
           {novel.updated_at && (
             <span className="text-xs text-notion-text-secondary ml-auto">
@@ -158,9 +159,13 @@ function NewNovelModal({ onClose, onCreate }: {
   onCreate: (data: { title: string; genre?: string; description?: string; cover_image?: string }) => void;
 }) {
   const [title, setTitle] = useState("");
-  const [genre, setGenre] = useState("");
+  const [genres, setGenres] = useState<string[]>([]);
   const [description, setDescription] = useState("");
   const { preview, inputEl, openPicker, clear } = useCoverUpload();
+
+  function toggleGenre(g: string) {
+    setGenres((prev) => prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]);
+  }
 
   return (
     <div
@@ -213,25 +218,31 @@ function NewNovelModal({ onClose, onCreate }: {
               className="w-full px-3 py-2.5 text-sm border border-notion-border rounded-lg outline-none focus:border-moneta focus:ring-1 focus:ring-moneta/20 transition-all"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && title.trim())
-                  onCreate({ title, genre, description, cover_image: preview });
+                  onCreate({ title, genre: genres.join(" · ") || undefined, description, cover_image: preview });
               }}
             />
           </div>
 
-          {/* 장르 */}
+          {/* 장르 (복수 선택) */}
           <div>
-            <label className="block text-sm text-notion-text-secondary mb-1.5">장르</label>
+            <label className="block text-sm text-notion-text-secondary mb-1.5">
+              장르
+              {genres.length > 0 && (
+                <span className="ml-2 text-moneta font-medium">{genres.length}개 선택됨</span>
+              )}
+            </label>
             <div className="flex flex-wrap gap-2">
               {GENRES.map((g) => (
                 <button
                   key={g}
-                  onClick={() => setGenre(genre === g ? "" : g)}
+                  onClick={() => toggleGenre(g)}
                   className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                    genre === g
+                    genres.includes(g)
                       ? "bg-moneta text-white border-moneta"
                       : "border-notion-border text-notion-text-secondary hover:border-moneta hover:text-moneta"
                   }`}
                 >
+                  {genres.includes(g) && <span className="mr-1">✓</span>}
                   {g}
                 </button>
               ))}
@@ -259,7 +270,7 @@ function NewNovelModal({ onClose, onCreate }: {
             취소
           </button>
           <button
-            onClick={() => title.trim() && onCreate({ title, genre, description, cover_image: preview })}
+            onClick={() => title.trim() && onCreate({ title, genre: genres.join(" · ") || undefined, description, cover_image: preview })}
             disabled={!title.trim()}
             className="px-5 py-2 text-sm bg-moneta text-white rounded-lg hover:bg-moneta-dark transition-colors disabled:opacity-40"
           >
