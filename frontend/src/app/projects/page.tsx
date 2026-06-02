@@ -10,7 +10,7 @@ import {
   deleteNovelOnServer,
 } from "@/lib/api";
 
-const GENRES = ["판타지", "로맨스", "로맨스 판타지", "현대 판타지", "무협", "SF", "공포/스릴러", "기타"];
+const GENRES = ["판타지", "로맨스", "로맨스 판타지", "현대 판타지", "무협", "SF", "공포/스릴러", "대체역사", "기타"];
 
 function timeAgo(iso?: string): string {
   if (!iso) return "";
