@@ -227,7 +227,14 @@ export default function Sidebar({ projectName }: Props) {
   const documents = getDocuments();
   const folders = getFolders();
   const activeNovel = getActiveNovel();
-  const displayName = projectName ?? activeNovel?.title ?? "내 소설";
+
+  // Zustand persist 하이드레이션 불일치 방지
+  // 마운트 전에는 서버와 동일한 기본값 사용
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const displayName = mounted
+    ? (projectName ?? activeNovel?.title ?? "내 소설")
+    : "내 소설";
 
   const navItems = [
     { href: "/plot",       icon: "📋", label: "플롯 보드" },
@@ -571,7 +578,7 @@ export default function Sidebar({ projectName }: Props) {
             <div className="w-5 h-5 rounded bg-moneta flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
               M
             </div>
-            <span className="text-white/90 font-semibold text-sm truncate">
+            <span suppressHydrationWarning className="text-white/90 font-semibold text-sm truncate">
               {displayName}
             </span>
           </Link>
@@ -708,43 +715,45 @@ export default function Sidebar({ projectName }: Props) {
             </div>
           )}
 
-          {/* 미분류 문서 */}
-          {ungroupedDocs.map((doc) => renderDoc(doc, false))}
+          {/* 미분류 문서 / 폴더 — mounted 후에만 렌더 (Zustand 하이드레이션 불일치 방지) */}
+          {mounted && (
+            <>
+              {ungroupedDocs.map((doc) => renderDoc(doc, false))}
 
-          {/* 폴더 + 폴더 내 문서 */}
-          {folders.map((folder) => {
-            const folderDocs = docsInFolder(folder.id);
-            return (
-              <FolderRow
-                key={folder.id}
-                folder={folder}
-                docs={folderDocs}
-                activeDocId={activeDocId}
-                isRenamingFolder={renamingFolder === folder.id}
-                folderRenameRef={folderRenameRef}
-                onCommitFolderRename={commitFolderRename}
-                onToggleCollapse={() => updateFolder({ ...folder, collapsed: !folder.collapsed })}
-                onFolderContextMenu={(e, id) => setFolderContextMenu({ folderId: id, x: e.clientX, y: e.clientY })}
-                onDragOver={(e) => { e.preventDefault(); }}
-                onDrop={onFolderDrop}
-              >
-                {folderDocs.length === 0 ? (
-                  <div className="pl-6 pr-2 py-1 text-[10px] text-white/20 italic">비어있음</div>
-                ) : (
-                  folderDocs.map((doc) => renderDoc(doc, true))
-                )}
-              </FolderRow>
-            );
-          })}
+              {folders.map((folder) => {
+                const folderDocs = docsInFolder(folder.id);
+                return (
+                  <FolderRow
+                    key={folder.id}
+                    folder={folder}
+                    docs={folderDocs}
+                    activeDocId={activeDocId}
+                    isRenamingFolder={renamingFolder === folder.id}
+                    folderRenameRef={folderRenameRef}
+                    onCommitFolderRename={commitFolderRename}
+                    onToggleCollapse={() => updateFolder({ ...folder, collapsed: !folder.collapsed })}
+                    onFolderContextMenu={(e, id) => setFolderContextMenu({ folderId: id, x: e.clientX, y: e.clientY })}
+                    onDragOver={(e) => { e.preventDefault(); }}
+                    onDrop={onFolderDrop}
+                  >
+                    {folderDocs.length === 0 ? (
+                      <div className="pl-6 pr-2 py-1 text-[10px] text-white/20 italic">비어있음</div>
+                    ) : (
+                      folderDocs.map((doc) => renderDoc(doc, true))
+                    )}
+                  </FolderRow>
+                );
+              })}
 
-          {/* 빈 상태 */}
-          {sortedDocs.length === 0 && !addingFolder && (
-            <button
-              onClick={() => addDocument()}
-              className="w-full text-left px-2 py-2 text-white/25 text-xs hover:text-white/50 transition-colors rounded"
-            >
-              + 첫 번째 회차 추가하기
-            </button>
+              {sortedDocs.length === 0 && !addingFolder && (
+                <button
+                  onClick={() => addDocument()}
+                  className="w-full text-left px-2 py-2 text-white/25 text-xs hover:text-white/50 transition-colors rounded"
+                >
+                  + 첫 번째 회차 추가하기
+                </button>
+              )}
+            </>
           )}
 
           {/* 구분선 */}
