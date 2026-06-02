@@ -2,13 +2,16 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 // 로그인 없이 접근 가능한 경로
-const PUBLIC_PATHS = ["/", "/login", "/signup"];
+const PUBLIC_PATHS = ["/login", "/signup"];
+const PUBLIC_EXACT = ["/"]; // startsWith 대신 정확히 일치해야 하는 경로
 
 export function middleware(request: NextRequest) {
   const token = request.cookies.get("moneta_token")?.value;
   const { pathname } = request.nextUrl;
 
-  const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+  const isPublic =
+    PUBLIC_EXACT.includes(pathname) ||
+    PUBLIC_PATHS.some((p) => pathname.startsWith(p));
 
   // 토큰 없이 보호된 경로 접근 → 로그인으로
   if (!token && !isPublic) {
