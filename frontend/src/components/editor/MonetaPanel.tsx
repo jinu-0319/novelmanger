@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useStore } from "@/store/useStore";
-import { checkSpell, type SpellResult, type SpellCorrection, suggestPlot, generatePlot, type PlotSuggestion } from "@/lib/api";
-import type { AnalysisItem, WikiItem } from "@/types";
+import { suggestPlot, generatePlot, type PlotSuggestion } from "@/lib/api";
+import type { AnalysisItem } from "@/types";
 import WikiModal from "./WikiModal";
 
 interface Props {
@@ -191,164 +191,8 @@ function ClioSection({ getContent, docTitle }: { getContent: () => string; docTi
   );
 }
 
-// ── 맞춤법 섹션 ──────────────────────────────────────────────────────────
+// (맞춤법 섹션은 SpellPanel.tsx로 분리됨)
 
-function CorrectionItem({
-  item,
-  onApply,
-}: {
-  item: SpellCorrection;
-  onApply: (c: SpellCorrection) => void;
-}) {
-  const [applied, setApplied] = useState(false);
-  return (
-    <div className={`rounded-lg border border-notion-border px-3 py-2 mb-2 flex items-center justify-between gap-2 ${applied ? "opacity-40" : ""}`}>
-      <div className="flex items-center gap-2 flex-1 min-w-0 text-xs">
-        <span className="text-red-500 line-through truncate">{item.original}</span>
-        <span className="text-notion-text-secondary flex-shrink-0">→</span>
-        <span className="text-green-600 font-medium truncate">{item.corrected}</span>
-      </div>
-      {!applied && (
-        <button
-          onClick={() => { onApply(item); setApplied(true); }}
-          className="text-xs bg-green-50 text-green-600 border border-green-200 px-2 py-0.5 rounded hover:bg-green-100 transition-colors flex-shrink-0"
-        >
-          적용
-        </button>
-      )}
-    </div>
-  );
-}
-
-function SpellSection({
-  getContent,
-  applyContent,
-}: {
-  getContent: () => string;
-  applyContent?: (html: string) => void;
-}) {
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<SpellResult | null>(null);
-  const [apiError, setApiError] = useState<string | null>(null);
-
-  async function runCheck() {
-    const html = getContent();
-    const text = stripHtmlLocal(html);
-    if (!text.trim()) return;
-
-    setLoading(true);
-    setApiError(null);
-    setResult(null);
-    try {
-      const data = await checkSpell(text);
-      if (data.error) {
-        setApiError(data.error);
-      } else {
-        setResult(data);
-      }
-    } catch (e) {
-      setApiError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // 개별 단어 교정 적용
-  function applySingle(correction: SpellCorrection) {
-    if (!applyContent) return;
-    let html = getContent();
-    const escaped = correction.original.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    html = html.replace(new RegExp(escaped, "g"), correction.corrected);
-    applyContent(html);
-  }
-
-  // 전체 교정 적용
-  function applyAll() {
-    if (!applyContent || !result) return;
-    let html = getContent();
-    for (const c of result.corrections) {
-      const escaped = c.original.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      html = html.replace(new RegExp(escaped, "g"), c.corrected);
-    }
-    applyContent(html);
-    setResult(null);
-  }
-
-  return (
-    <div className="mb-6">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <span>✍️</span>
-          <span className="font-semibold text-sm text-notion-text">맞춤법</span>
-          <span className="text-xs text-notion-text-secondary">한국어 교정</span>
-        </div>
-        {result && (
-          <button onClick={() => setResult(null)} className="text-xs text-notion-text-secondary hover:text-notion-text transition-colors">
-            지우기
-          </button>
-        )}
-      </div>
-
-      <button
-        onClick={runCheck}
-        disabled={loading}
-        className={`w-full py-2 px-4 rounded-lg text-sm font-medium transition-all ${
-          loading
-            ? "opacity-60 cursor-not-allowed bg-notion-bg-secondary text-notion-text-secondary"
-            : "bg-moneta text-white hover:opacity-90 shadow-sm"
-        }`}
-      >
-        {loading ? <span className="flex items-center justify-center gap-2"><Spinner /> 검사 중...</span> : "검사 시작"}
-      </button>
-
-      {apiError && (
-        <div className="mt-2 p-2.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-500">
-          {apiError}
-        </div>
-      )}
-
-      {result && (
-        <div className="mt-3">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-notion-text-secondary">
-              {result.error_count === 0
-                ? "✓ 맞춤법 오류 없음"
-                : `오류 ${result.error_count}건 발견`}
-            </span>
-            {result.corrections.length > 0 && applyContent && (
-              <button
-                onClick={applyAll}
-                className="text-xs bg-moneta text-white px-2.5 py-1 rounded-lg hover:opacity-90 transition-opacity"
-              >
-                전체 적용
-              </button>
-            )}
-          </div>
-
-          {result.corrections.length === 0 && (
-            <div className="text-center py-3 text-sm text-notion-text-secondary">
-              수정할 내용이 없습니다 🎉
-            </div>
-          )}
-
-          {result.corrections.map((c, i) => (
-            <CorrectionItem
-              key={i}
-              item={c}
-              onApply={applySingle}
-            />
-          ))}
-
-          {!applyContent && result.corrections.length > 0 && (
-            <p className="text-xs text-notion-text-secondary mt-2 text-center">
-              교정 적용은 에디터에서 직접 수정해주세요
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── 플롯 섹션 ────────────────────────────────────────────────────────────
 
@@ -594,7 +438,7 @@ function WikiMiniSection() {
 
 // ── 탭 타입 ───────────────────────────────────────────────────────────────
 
-type TabId = "ai" | "spell" | "plot";
+type TabId = "ai" | "plot";
 
 export default function MonetaPanel({
   getContent,
@@ -628,7 +472,7 @@ export default function MonetaPanel({
 
       {/* 탭 */}
       <div className="flex border-b border-notion-border">
-        {(["ai", "spell", "plot"] as TabId[]).map((tab) => (
+        {(["ai", "plot"] as TabId[]).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -638,7 +482,7 @@ export default function MonetaPanel({
                 : "text-notion-text-secondary hover:text-notion-text"
             }`}
           >
-            {tab === "ai" ? "🔮 AI 분석" : tab === "spell" ? "✍️ 맞춤법" : "📖 플롯"}
+            {tab === "ai" ? "🔮 AI 분석" : "📖 플롯"}
           </button>
         ))}
       </div>
@@ -653,9 +497,6 @@ export default function MonetaPanel({
             <div className="border-t border-notion-border my-4" />
             <WikiMiniSection />
           </>
-        )}
-        {activeTab === "spell" && (
-          <SpellSection getContent={getContent} applyContent={applyContent} />
         )}
         {activeTab === "plot" && (
           <PlotSection

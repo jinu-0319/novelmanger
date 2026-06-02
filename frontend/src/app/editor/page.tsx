@@ -7,6 +7,7 @@ import Sidebar from "@/components/layout/Sidebar";
 import NovelEditor, { type NovelEditorRef } from "@/components/editor/NovelEditor";
 import MonetaPanel from "@/components/editor/MonetaPanel";
 import ReviewPanel from "@/components/editor/ReviewPanel";
+import SpellPanel from "@/components/editor/SpellPanel";
 import ExportModal from "@/components/editor/ExportModal";
 
 function EditorContent() {
@@ -19,6 +20,7 @@ function EditorContent() {
   const toggleMonetaPanel = useStore((s) => s.toggleMonetaPanel);
 
   const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
+  const [spellPanelOpen, setSpellPanelOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const upsertDocument = useStore((s) => s.upsertDocument);
 
@@ -84,11 +86,30 @@ function EditorContent() {
               <span className="hidden sm:inline">내보내기</span>
             </button>
 
+            {/* 맞춤법 */}
+            <button
+              onClick={() => {
+                setSpellPanelOpen((v) => !v);
+                if (reviewPanelOpen) setReviewPanelOpen(false);
+                if (monetaPanelOpen) toggleMonetaPanel();
+              }}
+              className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-md border transition-all ${
+                spellPanelOpen
+                  ? "bg-emerald-500 text-white border-emerald-500"
+                  : "bg-notion-bg-secondary text-notion-text-secondary border-notion-border hover:bg-notion-border hover:text-notion-text"
+              }`}
+              title="맞춤법 검사"
+            >
+              <span>✍️</span>
+              <span className="hidden sm:inline">맞춤법</span>
+            </button>
+
             {/* AI 리뷰 */}
             <button
               onClick={() => {
                 setReviewPanelOpen((v) => !v);
                 if (monetaPanelOpen) toggleMonetaPanel();
+                if (spellPanelOpen) setSpellPanelOpen(false);
               }}
               className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-md border transition-all ${
                 reviewPanelOpen
@@ -106,6 +127,7 @@ function EditorContent() {
               onClick={() => {
                 toggleMonetaPanel();
                 if (reviewPanelOpen) setReviewPanelOpen(false);
+                if (spellPanelOpen) setSpellPanelOpen(false);
               }}
               className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-md border transition-all ${
                 monetaPanelOpen
@@ -162,6 +184,14 @@ function EditorContent() {
               currentDocId={activeDoc?.id}
               novelTitle={activeNovel?.title ?? "소설"}
               author={activeNovel?.description ?? ""}
+            />
+          )}
+
+          {spellPanelOpen && activeDoc && (
+            <SpellPanel
+              getContent={() => editorRef.current?.getHTML() ?? activeDoc.content}
+              applyContent={handleApplyContent}
+              onClose={() => setSpellPanelOpen(false)}
             />
           )}
 
