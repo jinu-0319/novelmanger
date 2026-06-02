@@ -4,13 +4,34 @@ const nextConfig = {
   output: "standalone",
 
   async rewrites() {
-    return [
-      {
-        // NextAuth 자체 경로(/api/auth/*)는 프록시에서 제외
-        source: "/api/((?!auth/).*)",
-        destination: `${process.env.BACKEND_URL ?? "http://localhost:8000"}/:path*`,
-      },
-    ];
+    const BACKEND = process.env.BACKEND_URL ?? "http://localhost:8000";
+
+    return {
+      // beforeFiles: 파일시스템(NextAuth 포함) 보다 먼저 실행
+      // → /api/auth/register|login|me 를 NextAuth가 가로채기 전에 백엔드로 보냄
+      beforeFiles: [
+        {
+          source: "/api/auth/register",
+          destination: `${BACKEND}/auth/register`,
+        },
+        {
+          source: "/api/auth/login",
+          destination: `${BACKEND}/auth/login`,
+        },
+        {
+          source: "/api/auth/me",
+          destination: `${BACKEND}/auth/me`,
+        },
+      ],
+
+      // afterFiles: 나머지 /api/* → 백엔드 (NextAuth 경로 /api/auth/* 는 위에서 처리됐거나 여기서도 제외)
+      afterFiles: [
+        {
+          source: "/api/((?!auth/).*)",
+          destination: `${BACKEND}/:path*`,
+        },
+      ],
+    };
   },
 };
 
