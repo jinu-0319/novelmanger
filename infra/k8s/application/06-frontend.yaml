@@ -15,13 +15,25 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: ghcr.io/haha9430/moneta-frontend:latest
-        imagePullPolicy: Always  # GHCR에서 새 이미지를 항상 받아오도록 설정
+        # ── 이미지 교체 시 이 줄만 수정 ──────────────────────────────────────
+        # GHCR 사용 예시: ghcr.io/YOUR_GITHUB_ORG/moneta-frontend:latest
+        image: ghcr.io/YOUR_GITHUB_ORG/moneta-frontend:latest
+        # ───────────────────────────────────────────────────────────────────
+        imagePullPolicy: Always
         ports:
         - containerPort: 3000
         env:
-          - name: BACKEND_URL
-            value: "http://backend:8880"
+        - name: BACKEND_URL
+          value: "http://backend:8000"
+        - name: NEXTAUTH_URL
+          # ── 실제 도메인으로 교체 ──────────────────────────────────────────
+          value: "https://your-domain.com"
+        - name: NEXTAUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: app-secret
+              key: NEXTAUTH_SECRET
+              optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -32,5 +44,5 @@ spec:
   selector:
     app: frontend
   ports:
-  - port: 80            # 서비스는 80번으로 받아서 (브라우저 접속 편하게)
+  - port: 80
     targetPort: 3000

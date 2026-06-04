@@ -1,5 +1,13 @@
 **/chroma_data/**
 
+# 사용자 개인 데이터 (계정 정보, 소설 데이터)
+app/data/users.json
+app/data/users/
+app/data/chroma_db/
+
+# PyCharm 실행 설정 (로컬 전용)
+.idea/runConfigurations/
+
 ### Python template
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -19,6 +27,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+# frontend/src/lib 은 소스코드이므로 제외 대상에서 명시적으로 허용
+!frontend/src/lib/
 parts/
 sdist/
 var/
@@ -127,6 +137,7 @@ celerybeat.pid
 # Environments
 .env
 .env.*
+!.env.example
 .venv
 env/
 venv/

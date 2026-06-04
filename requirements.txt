@@ -1,3 +1,6 @@
 pymupdf
 python-docx
 olefile
+fpdf2
+ebooklib
+beautifulsoup4

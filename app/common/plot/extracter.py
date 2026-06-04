@@ -1,6 +1,6 @@
-﻿import os
+import os
 import json
-from langchain_google_genai import ChatGoogleGenerativeAI
+from app.core.llm import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from dotenv import load_dotenv
@@ -10,7 +10,7 @@ load_dotenv()
 
 class PlotManager:
     def __init__(self):
-        self.llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+        self.llm = get_llm(temperature=0.2)
         self.parser = JsonOutputParser()
         self.output_file = "plot.json"
 

@@ -1,4 +1,3 @@
-# 04-backend.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -14,8 +13,6 @@ spec:
       labels:
         app: backend
     spec:
-      # [중요 1] 초기화 컨테이너: 데이터 폴더의 권한을 777(누구나 쓰기 가능)로 변경
-      # 이게 없으면 PVC를 연결해도 Permission Denied가 또 뜹니다.
       initContainers:
       - name: fix-permissions
         image: busybox
@@ -26,23 +23,35 @@ spec:
 
       containers:
       - name: backend
-        image: ghcr.io/haha9430/moneta-backend:latest # [수정] GHCR 경로
+        # ── 이미지 교체 시 이 줄만 수정 ──────────────────────────────────────
+        # GHCR 사용 예시: ghcr.io/YOUR_GITHUB_ORG/moneta-backend:latest
+        # ECR  사용 예시: 123456789.dkr.ecr.ap-northeast-2.amazonaws.com/moneta-backend:latest
+        image: ghcr.io/YOUR_GITHUB_ORG/moneta-backend:latest
+        # ───────────────────────────────────────────────────────────────────
         imagePullPolicy: Always
         ports:
-        - containerPort: 8880
+        - containerPort: 8000
         envFrom:
         - configMapRef:
             name: app-config
         - secretRef:
             name: app-secret
-
-        # [중요 2] 볼륨 마운트: 컨테이너 내부 경로를 PVC와 연결
         volumeMounts:
         - name: data-volume
-          # 에러 로그에 나온 경로가 '/app/app/data' 이므로 여기와 매핑
           mountPath: /app/app/data
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
 
-      # [중요 3] 볼륨 정의
       volumes:
       - name: data-volume
         persistentVolumeClaim:
@@ -57,5 +66,5 @@ spec:
   selector:
     app: backend
   ports:
-  - port: 8880
-    targetPort: 8880
+  - port: 8000
+    targetPort: 8000

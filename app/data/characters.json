@@ -1,3 +1,17 @@
 {
-
+    "ㅁㄴㅇㅁㄴㅇ": {
+        "name": "Unknown",
+        "age_gender": "ㅁㄴㅇㅁㄴ ㅁㄴ",
+        "job_status": "none",
+        "core_traits": "none",
+        "personality": {
+            "pros": "none",
+            "cons": "none"
+        },
+        "relationships": "none",
+        "outer_goal": "none",
+        "inner_goal": "none",
+        "trauma_weakness": "none",
+        "speech_habit": "none"
+    }
 }

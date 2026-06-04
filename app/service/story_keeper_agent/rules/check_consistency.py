@@ -1,16 +1,12 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
-import re as _re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
-
-# 원고 최대 전송 길이 (룰 검사 & 배치 검증 공통)
-_MAX_MANUSCRIPT_CHARS = 8000
-_ANY_JSON_RE = _re.compile(r"\{.*\}", _re.DOTALL)
+from app.core.llm import get_llm
 
 TYPE_LABELS = {
     "world": "세계관 오류",
@@ -194,78 +190,73 @@ def _merge_same_sentence(issues: List[Issue]) -> List[Issue]:
     return merged
 
 
-def _batch_verify_unresolved(issues: List[Issue], full_text: str) -> List[bool]:
+def _batch_resolve_check(issues: List[Issue], full_text: str) -> Set[int]:
     """
-    여러 이슈를 한 번의 LLM 호출로 일괄 검증.
-    기존 _verify_issue_not_resolved_by_later_text 의 N번 호출을 1번으로 줄임.
-
-    반환: issues와 동일 길이의 bool 리스트
-      True  → 해소되지 않음 (이슈 유지)
-      False → 후반에서 해소됨 (이슈 제거)
+    여러 이슈가 원고 후반에서 해소되었는지 한 번의 LLM 호출로 일괄 확인.
+    반환값: '해소된 이슈'의 인덱스 집합 (이 인덱스는 alive 목록에서 제거)
     """
     if not full_text.strip() or not issues:
-        return [True] * len(issues)
+        return set()
 
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+    # sentence 없는 이슈는 건너뜀
+    checkable = [(idx, i) for idx, i in enumerate(issues) if i.sentence and i.sentence.strip()]
+    if not checkable:
+        return set()
 
-    issue_list = [
-        {
-            "idx": i,
-            "title": iss.title or "",
-            "sentence": iss.sentence or "",
-            "reason": iss.reason or "",
-        }
-        for i, iss in enumerate(issues)
-    ]
+    items_text = ""
+    for idx, issue in checkable:
+        items_text += f"""
+---
+[ID: {idx}]
+- 이슈 제목: {issue.title}
+- 문제 문장: {issue.sentence}
+- 이슈 이유: {issue.reason}
+"""
+
+    llm = get_llm(temperature=0.2)
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", """
 너는 '이슈 후반 해소 검증기'다.
-아래 issues 목록의 각 항목에 대해, 원고를 끝까지 읽고
-해당 sentence가 이후 내용에서 명시적으로 정정/해소되는지 판단해라.
+원고 전체를 끝까지 읽고, 각 이슈 문장이 후반에서 명시적으로 정정/해소되었는지 판단한다.
 
 판정 기준:
-- 후반에서 명시적으로 정정/해소 → resolved: true
-- 근거 없이 추측하지 말 것. 원고 문장 기반으로만.
+- 후반에서 명시적으로 정정·해소된 경우만 resolved=true
+- 근거 없는 추측 금지. 원고 문장 기반으로만 판단.
 
 출력 JSON only:
-{{ "results": [ {{ "idx": 0, "resolved": true }}, {{ "idx": 1, "resolved": false }}, ... ] }}
+{{ "results": {{ "<ID>": {{ "resolved": true|false }} }} }}
 """),
-        ("human", """[issues]
-{issues_json}
+        ("human", """[이슈 목록]
+{items}
 
-[manuscript]
-{manuscript}
+[원고 전체]
+{full_text}
 """),
     ])
 
     try:
         raw = (prompt | llm).invoke({
-            "issues_json": json.dumps(issue_list, ensure_ascii=False),
-            "manuscript": full_text[:_MAX_MANUSCRIPT_CHARS],
+            "items": items_text,
+            "full_text": full_text,
         })
         content = (raw.content if hasattr(raw, "content") else str(raw)) or ""
+        # JSON 파싱
+        import re as _re
+        m = _re.search(r"\{.*\}", content, _re.DOTALL)
+        if not m:
+            return set()
+        data = json.loads(m.group(0))
+        results = data.get("results", {})
 
-        m = _ANY_JSON_RE.search(content)
-        data: Dict[str, Any] = {}
-        if m:
-            try:
-                data = json.loads(m.group(0))
-            except Exception:
-                pass
-
-        results_map: Dict[int, bool] = {}
-        for r in (data.get("results") or []):
-            if isinstance(r, dict) and "idx" in r:
-                results_map[int(r["idx"])] = bool(r.get("resolved", False))
-
-        # resolved=True  → 이미 해소됨 → keep=False (제거)
-        # resolved=False → 미해소       → keep=True  (유지)
-        return [not results_map.get(i, False) for i in range(len(issues))]
-
+        resolved_indices: Set[int] = set()
+        for idx, _ in checkable:
+            r = results.get(str(idx), {})
+            if isinstance(r, dict) and r.get("resolved") is True:
+                resolved_indices.add(idx)
+        return resolved_indices
     except Exception:
-        # LLM 실패 시 보수적으로 전부 유지
-        return [True] * len(issues)
+        return set()
 
 
 def check_consistency(
@@ -275,6 +266,7 @@ def check_consistency(
     character_config: Dict[str, Any],
     story_state: Dict[str, Any],
     severity_threshold: str = "medium",
+    genre: str = "",
 ) -> List[Dict[str, Any]]:
     from .world_rules import check_world_consistency
     from .character_rules import check_character_consistency
@@ -284,16 +276,45 @@ def check_consistency(
     if threshold_rank not in (1, 2, 3):
         threshold_rank = 2
 
+    # ── 3-pass 병렬 실행 ──────────────────────────────────────────────────────
     issues: List[Issue] = []
-    issues += check_world_consistency(episode_facts, plot_config)
-    issues += check_character_consistency(episode_facts, character_config, story_state)
-    issues += check_plot_consistency(episode_facts, plot_config, story_state)
+
+    def _run_world():
+        return check_world_consistency(episode_facts, plot_config, genre=genre)
+
+    def _run_character():
+        return check_character_consistency(episode_facts, character_config, story_state, genre=genre)
+
+    def _run_plot():
+        return check_plot_consistency(episode_facts, plot_config, story_state, genre=genre)
+
+    tasks = {
+        "world": _run_world,
+        "character": _run_character,
+        "plot": _run_plot,
+    }
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {pool.submit(fn): name for name, fn in tasks.items()}
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                if isinstance(result, list):
+                    issues += result
+            except Exception as e:
+                task_name = futures[future]
+                issues.append(Issue(
+                    type=task_name,
+                    title=f"{task_name} 검사 실패",
+                    sentence="(원고 전체)",
+                    reason=f"병렬 실행 중 예외 발생: {repr(e)}",
+                    severity="high",
+                ))
 
     full_text = episode_facts.get("raw_text", "") if isinstance(episode_facts, dict) else ""
 
-    alive: List[Issue] = []
-    candidates: List[Issue] = []  # 배치 검증 대상
-
+    # ── 1단계: 기본 필터링 ────────────────────────────────────────────────────
+    pre_alive: List[Issue] = []
     for i in issues:
         if _is_failure_issue(i):
             i.severity = "high"
@@ -302,7 +323,7 @@ def check_consistency(
             if not i.reason:
                 i.reason = "룰 엔진이 정상적으로 결과를 만들지 못했습니다."
             if _severity_rank(i.severity) >= threshold_rank:
-                alive.append(i)
+                pre_alive.append(i)
             continue
 
         if not i.sentence or not i.reason:
@@ -311,17 +332,22 @@ def check_consistency(
         if _looks_like_non_conflict(i.reason, i.title):
             continue
 
-        candidates.append(i)
-
-    # 이슈별 개별 LLM 호출(N번) → 단일 배치 호출(1번)
-    keep_flags = _batch_verify_unresolved(candidates, full_text)
-
-    for i, keep in zip(candidates, keep_flags):
-        if not keep:
-            continue
         if _severity_rank(i.severity) < threshold_rank:
             continue
-        alive.append(i)
+
+        pre_alive.append(i)
+
+    # ── 2단계: 배치 해소 검증 (N개 이슈 → LLM 1회 호출) ─────────────────────
+    # failure 이슈는 검증 대상에서 제외
+    verifiable = [i for i in pre_alive if not _is_failure_issue(i)]
+    failures = [i for i in pre_alive if _is_failure_issue(i)]
+
+    resolved_indices = _batch_resolve_check(verifiable, full_text)
+
+    alive: List[Issue] = list(failures)
+    for idx, i in enumerate(verifiable):
+        if idx not in resolved_indices:
+            alive.append(i)
 
     merged = _merge_same_sentence(alive)
     return [x.to_dict() for x in merged]

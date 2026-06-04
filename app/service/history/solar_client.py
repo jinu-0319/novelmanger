@@ -1,18 +1,18 @@
-﻿# app/service/history/history_client.py
+# app/service/history/history_client.py
 from __future__ import annotations
 import json
 import os
 import requests
 from typing import Any, Dict, List
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
+from app.core.llm import get_llm
 
 load_dotenv()
 
 class HistoryLLMClient:
     def __init__(self) -> None:
-        self.llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+        self.llm = get_llm(temperature=0.1)
 
     def parse_history_command(self, text: str) -> List[Dict[str, Any]]:
         """
@@ -88,12 +88,24 @@ class HistoryLLMClient:
             return []
 
     def _request(self, system_prompt: str, user_prompt: str) -> str:
-        """LangChain 기반 호출로 위임 (하위 호환 유지용)"""
-        response = self.llm.invoke([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt),
-        ])
-        return response.content
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.1, # 정확성을 위해 낮춤
+        }
+
+        resp = requests.post(self.base_url, headers=headers, json=payload, timeout=30)
+        resp.raise_for_status()
+
+        data = resp.json()
+        return data["choices"][0]["message"]["content"]
 
     def _strip_code_fences(self, s: str) -> str:
         s = s.strip()

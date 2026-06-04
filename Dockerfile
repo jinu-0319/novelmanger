@@ -53,7 +53,6 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/main.py /app/main.py
 COPY --from=builder /app/app /app/app
 COPY --from=builder /app/infra /app/infra
-COPY --from=builder /app/template /app/template
 COPY --from=builder /app/pyproject.toml /app/pyproject.toml
 
 # venv를 기본 Python으로 사용
@@ -62,6 +61,6 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 USER appuser
 
-EXPOSE 8880
+EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8880"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
