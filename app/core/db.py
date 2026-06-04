@@ -71,7 +71,7 @@ class ChromaDBConnectionManager:
             try:
                 collection = self.client.get_or_create_collection(
                     name=name,
-                    metadata={"description": "Upstage Solar2 embeddings collection"}
+                    metadata={"description": "Moneta embeddings collection"}
                 )
                 self._collections_cache[name] = collection
                 logger.debug(f"Collection '{name}' cached")

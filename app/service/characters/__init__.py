@@ -266,16 +266,16 @@ def _extract_from_text(text: str) -> Any:
 
     if SolarClient is not None:
         try:
-            print("   🔌 SolarClient 호출 중...")
+            print("   🔌 CharacterLLM 호출 중...")
             client = SolarClient()
             result = client.parse_character(text)
             if result:
-                print(f"   ✅ [Solar 응답 성공] 타입: {type(result)}")
+                print(f"   ✅ [Gemini 응답 성공] 타입: {type(result)}")
                 return result
         except Exception as e:
-            print(f"   🔥 [Solar 호출 에러] {e}")
+            print(f"   🔥 [Gemini 호출 에러] {e}")
 
-    print("   ⚠️ Solar 실패/미설정 -> 정규식 Fallback 실행")
+    print("   ⚠️ Gemini 실패 -> 정규식 Fallback 실행")
     sections = _collect_sections(text)
 
     h_age_gender = _extract_age_gender(text)

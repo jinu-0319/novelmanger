@@ -1,7 +1,6 @@
 ﻿from __future__ import annotations
 
 import json
-import os
 from typing import Any, Dict, List, Union
 
 try:
@@ -10,15 +9,18 @@ try:
 except ImportError:
     pass
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
+from app.core.llm import get_llm
 
 
-class SolarClient:
-    """캐릭터 파싱 클라이언트 (내부적으로 Gemini 사용)"""
+class CharacterLLMClient:
+    """캐릭터 파싱 클라이언트 (Gemini 사용)"""
 
     def __init__(self) -> None:
-        self.llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
+        self.llm = get_llm(temperature=0.1)
+
+# 하위 호환 별칭
+SolarClient = CharacterLLMClient
 
     # =========================================================
     # 1. 파일 업로드용: 캐릭터 추출 (강력한 다중 추출)
@@ -28,7 +30,7 @@ class SolarClient:
             return {}
 
         # 🔍 [디버깅] 입력 텍스트 길이 확인 (너무 짧으면 프론트 문제)
-        print(f"🔍 [SolarClient] 분석 요청 텍스트 길이: {len(text)}자")
+        print(f"🔍 [CharacterLLM] 분석 요청 텍스트 길이: {len(text)}자")
         if len(text) < 100:
             print(f"⚠️ 텍스트가 너무 짧습니다! 앞부분: {text}")
 
@@ -67,7 +69,7 @@ class SolarClient:
         content = self._clean_json_string(content)
 
         # 🔍 [디버깅] AI가 실제로 뱉은 앞부분 확인 (리스트인지 확인용)
-        print(f"🤖 [Solar Response Preview]: {content[:100]}...")
+        print(f"🤖 [Gemini Response Preview]: {content[:100]}...")
 
         try:
             # 리스트 파싱 우선 시도
@@ -78,17 +80,17 @@ class SolarClient:
                 end = content.rfind("]")
                 if end != -1:
                     data = json.loads(content[start:end + 1])
-                    print(f"✅ [SolarClient] 파싱 성공: {len(data)}명의 캐릭터 감지")
+                    print(f"✅ [CharacterLLM] 파싱 성공: {len(data)}명의 캐릭터 감지")
                     return data
 
             # 딕셔너리 파싱 시도 (AI가 말을 안 듣고 하나만 줬을 때)
             json_str = self._extract_json_object(content)
             data = json.loads(json_str)
-            print(f"⚠️ [SolarClient] 단일 객체 감지됨 (1명만 추출됨)")
+            print(f"⚠️ [CharacterLLM] 단일 객체 감지됨 (1명만 추출됨)")
             return data
 
         except json.JSONDecodeError as e:
-            print(f"⚠️ [SolarClient] JSON 파싱 실패: {e}")
+            print(f"⚠️ [CharacterLLM] JSON 파싱 실패: {e}")
             print(f"📄 [Raw Content]: {content}")  # 실패 시 전체 내용 출력
             return {}
 
@@ -125,7 +127,7 @@ class SolarClient:
         try:
             return json.loads(content)
         except json.JSONDecodeError as e:
-            raise ValueError(f"Solar output is not valid JSON: {e}")
+            raise ValueError(f"LLM output is not valid JSON: {e}")
 
     # =========================================================
     # 3. 내부 유틸리티 함수들

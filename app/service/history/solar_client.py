@@ -1,8 +1,6 @@
 # app/service/history/history_client.py
 from __future__ import annotations
 import json
-import os
-import requests
 from typing import Any, Dict, List
 from dotenv import load_dotenv
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -84,34 +82,5 @@ class HistoryLLMClient:
             print(f"❌ LLM 응답 파싱 실패: {response.content}")
             return []
         except Exception as e:
-            print(f"❌ Solar API 호출 오류: {e}")
+            print(f"❌ LLM 호출 오류: {e}")
             return []
-
-    def _request(self, system_prompt: str, user_prompt: str) -> str:
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0.1, # 정확성을 위해 낮춤
-        }
-
-        resp = requests.post(self.base_url, headers=headers, json=payload, timeout=30)
-        resp.raise_for_status()
-
-        data = resp.json()
-        return data["choices"][0]["message"]["content"]
-
-    def _strip_code_fences(self, s: str) -> str:
-        s = s.strip()
-        if s.startswith("```"):
-            lines = s.splitlines()
-            if lines[0].startswith("```"): lines = lines[1:]
-            if lines[-1].strip() == "```": lines = lines[:-1]
-            return "\n".join(lines).strip()
-        return s

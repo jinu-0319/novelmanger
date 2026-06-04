@@ -27,12 +27,17 @@ load_dotenv()
 EMBEDDING_MODEL = "models/embedding-001"
 
 
+def _get_api_key() -> str:
+    """GEMINI_API_KEY 우선, 없으면 GOOGLE_API_KEY fallback"""
+    return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+
+
 def get_llm(temperature: float = 0.3):
     """분석용 LLM — Gemini 2.5 Flash"""
     from langchain_google_genai import ChatGoogleGenerativeAI
     return ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
-        google_api_key=os.getenv("GEMINI_API_KEY"),
+        google_api_key=_get_api_key(),
         temperature=temperature,
     )
 
@@ -46,5 +51,5 @@ def get_embeddings():
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
     return GoogleGenerativeAIEmbeddings(
         model=EMBEDDING_MODEL,
-        google_api_key=os.getenv("GEMINI_API_KEY"),
+        google_api_key=_get_api_key(),
     )

@@ -27,7 +27,7 @@ class GeminiSettings(BaseSettings):
 
     def __init__(self):
         super().__init__()
-        self.api_key = self.get_env("GOOGLE_API_KEY", required=True)
+        self.api_key = self.get_env("GEMINI_API_KEY") or self.get_env("GOOGLE_API_KEY", required=True)
         self.chat_model = self.get_env("GEMINI_CHAT_MODEL", "gemini-2.5-flash")
         self.embedding_model = self.get_env("GEMINI_EMBEDDING_MODEL", "models/text-embedding-004")
 
@@ -39,7 +39,7 @@ class ChromaDBSettings(BaseSettings):
         super().__init__()
         self.host = self.get_env("CHROMA_HOST", "localhost")
         self.port = int(self.get_env("CHROMA_PORT", "8800"))
-        self.collection_name = self.get_env("CHROMA_COLLECTION_NAME", "upstage_embeddings")
+        self.collection_name = self.get_env("CHROMA_COLLECTION_NAME", "moneta_embeddings")
 
 
 gemini_settings = GeminiSettings()
