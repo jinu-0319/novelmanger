@@ -21,6 +21,9 @@ dependencies = [
     "openai>=1.52.2",               # OpenAI 클라이언트 (플롯 생성)
     # --- Search Tools ---
     "google-search-results>=2.4.0", # SerpAPI 래퍼
+    # --- Auth ---
+    "passlib[bcrypt]>=1.7.4",       # bcrypt 비밀번호 해싱
+    "python-jose[cryptography]>=3.3.0", # JWT 토큰
     # --- Utilities ---
     "python-dotenv>=1.0.0",         # .env 파일 로드
     "pydantic>=2.7.0",              # 데이터 검증

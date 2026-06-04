@@ -23,8 +23,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── 모델 설정 ─────────────────────────────────────────────────────────────────
-# 패키지 업그레이드 후 "models/text-embedding-004" 으로 변경하세요
-EMBEDDING_MODEL = "models/embedding-001"
+# langchain-google-genai 4.x + google-genai 2.x 기준
+# gemini-embedding-001: v1beta 호환, 3072차원
+EMBEDDING_MODEL = "gemini-embedding-001"
 
 
 def _get_api_key() -> str:
