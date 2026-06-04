@@ -1,11 +1,11 @@
-import json
+﻿import json
 import time
 import re
 from typing import List, Dict, Any, Set
 import difflib
 
 # LangChain & AI 관련
-from langchain_upstage import ChatUpstage
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.utilities import GoogleSerperAPIWrapper
@@ -16,7 +16,7 @@ from app.service.clio_fact_checker_agent.repo import ManuscriptRepository
 class ManuscriptAnalyzer:
     def __init__(self, setting_path: str, character_path: str):
         # 1. LLM 설정 (Solar-pro)
-        self.llm = ChatUpstage(model="solar-pro")
+        self.llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
 
         # 2. 소설 설정(Plot DB) 로드 -> 허구 정보 필터링용
         self.settings = self._load_settings(setting_path)
@@ -241,10 +241,22 @@ class ManuscriptAnalyzer:
         """
         [수정됨] 단순 명사가 아닌 '역사적 사실 관계(명제)'와 '시대적 정합성'을 검증하는 쿼리 생성기
         """
-        prompt = """
+        # 등록된 허구 인물/설정을 프롬프트에 포함해 LLM이 직접 제외하도록 함
+        fiction_names = sorted(self.setting_keywords)[:60]
+        fiction_block = (
+            "\n        [소설 속 창작 인물/설정 (추출 절대 금지)]\n"
+            "        아래는 이 소설의 창작 인물·지명·단체입니다. 실존하지 않으므로 keyword로 추출하지 마세요:\n"
+            f"        {', '.join(fiction_names)}\n"
+        ) if fiction_names else (
+            "\n        [주의] 소설 고유 설정이 별도 등록되지 않았습니다.\n"
+            "        인물·지명이 역사 자료에서 확인 가능한 실존 대상인지 스스로 판단하세요.\n"
+            "        판단이 불확실하면 추출하지 마세요.\n"
+        )
+
+        prompt = f"""
         당신은 역사 소설의 고증 오류를 찾아내는 '팩트체크 쿼리 설계자'입니다.
         단순한 고유명사 추출이 아니라, **"이 내용이 역사적으로 가능한가?"**를 검증하기 위한 **명제(Proposition)와 맥락**을 추출하세요.
-
+        {fiction_block}
         [추출 기준: 무엇을 검증해야 하는가?]
         1. **행위와 사건의 사실성 (Historical Plausibility):**
            - 실존 인물이 해당 시점에 그 장소에 있었거나, 그 행동을 했는지.
@@ -261,12 +273,12 @@ class ManuscriptAnalyzer:
         [출력 형식]
         반드시 아래와 같은 **JSON 리스트**만 출력하세요.
         [
-            {
+            {{
                 "keyword": "검증 대상 (짧은 구 혹은 주어+서술어 요약)",
                 "original_sentence": "본문에서 토씨 하나 안 바꾸고 그대로 복사한 문장 전체",
                 "search_query": "구글/위키피디아 검색을 위한 쿼리 (시대 키워드 포함)",
                 "reason": "이 항목을 역사적으로 검증해야 하는 구체적인 이유"
-            }
+            }}
         ]
         """
 

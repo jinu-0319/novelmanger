@@ -1,27 +1,24 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
 from typing import Any, Dict, List, Union
 
-import requests
-
 try:
     from dotenv import load_dotenv
-
     load_dotenv(override=True)
 except ImportError:
     pass
 
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import SystemMessage, HumanMessage
+
 
 class SolarClient:
-    def __init__(self) -> None:
-        self.api_key = os.getenv("SOLAR_API_KEY", "").strip() or os.getenv("UPSTAGE_API_KEY", "").strip()
-        self.base_url = os.getenv("SOLAR_BASE_URL", "https://api.upstage.ai/v1/chat/completions").strip()
-        self.model = os.getenv("SOLAR_MODEL", "solar-pro").strip()
+    """캐릭터 파싱 클라이언트 (내부적으로 Gemini 사용)"""
 
-        if not self.api_key:
-            print("⚠️ [Warning] Solar API Key가 없습니다. .env를 확인해주세요.")
+    def __init__(self) -> None:
+        self.llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
 
     # =========================================================
     # 1. 파일 업로드용: 캐릭터 추출 (강력한 다중 추출)
@@ -134,26 +131,11 @@ class SolarClient:
     # 3. 내부 유틸리티 함수들
     # =========================================================
     def _request(self, system_prompt: str, user_prompt: str, timeout: int = 60) -> str:
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0.1,  # 창의성 낮추고 정확도 높임
-        }
-
-        resp = requests.post(self.base_url, headers=headers, json=payload, timeout=timeout)
-        resp.raise_for_status()
-
-        data = resp.json()
-        if "choices" in data and data["choices"]:
-            return data["choices"][0]["message"]["content"]
-        return ""
+        response = self.llm.invoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ])
+        return response.content or ""
 
     def _strip_code_fences(self, s: str) -> str:
         s = (s or "").strip()

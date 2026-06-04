@@ -127,7 +127,7 @@ kubectl create secret docker-registry ghcr-secret \
 
 docker build -t moneta-backend:latest -f Dockerfile .
 
-docker build -t moneta-frontend:latest -f Dockerfile.frontend .
+docker build -t moneta-frontend:latest -f next-frontend/Dockerfile ./next-frontend
 
 #### 빌드한 이미지를 K3s가 인식하도록 가져오기
 
@@ -187,7 +187,7 @@ novelbright/
 ├── .gitignore                   # git 환경 제외 설정
 ├── .python-version              # python version
 ├── Dockerfile                   # backend Dockerfile
-├── Dockerfile.frontend          # frontend Dockerfile
+├── next-frontend/               # Next.js frontend
 ├── app/                         # 백엔드가 위치하는 디렉토리
 │   ├── common/                  # 공용 툴
 │   ├── core/                    # 기본 chroma db -> import 사용 
@@ -198,10 +198,7 @@ novelbright/
 │       ├── clio_fact_checker_agent/ # 역사 고증 확인 에이전트
 │       ├── history/             # 역사 자료
 │       └── story_keeper_agent/  # 설정 오류 확인 에이전트
-├── frontend/                    # 프론트엔드가 위치하는 디렉토리
-│   ├── component/               # frontend components
-│   ├── api.py                   # frontend API 호출
-│   └── main.py                  # frontend 메인
+├── next-frontend/               # frontend app and Dockerfile
 ├── infra/                       # docker/k8s
 │   └── k8s/application          # 배포 .yaml 파일(01~07)
 └── .github/workflows

@@ -1,7 +1,7 @@
 from typing import Optional, Dict
 
-from langchain.tools import functools
-from langchain_core.runnables import RunnablesConfig
+import functools
+from langchain_core.runnables import RunnableConfig
 
 from app.service.vector_service import VectorService
 

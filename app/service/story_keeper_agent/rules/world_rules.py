@@ -1,4 +1,4 @@
-# world_rules.py
+﻿# world_rules.py
 from __future__ import annotations
 
 import json
@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional as Opt
 
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_upstage import ChatUpstage
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from .check_consistency import Issue
 
@@ -16,6 +16,9 @@ load_dotenv()
 _CODEBLOCK_JSON_RE = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
 _ISSUES_JSON_RE = re.compile(r'(\{[^{}]*"issues"\s*:\s*\[.*?\][^{}]*\})', re.DOTALL)
 _ANY_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+# check_consistency._MAX_MANUSCRIPT_CHARS 와 동일 값으로 유지
+_MAX_MANUSCRIPT_CHARS = 8000
 
 
 def _safe_json_load(s: str) -> Opt[Dict[str, Any]]:
@@ -123,7 +126,7 @@ def check_world_consistency(
     if not anchors:
         return []
 
-    llm = ChatUpstage(model="solar-pro")
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", """
@@ -161,7 +164,7 @@ def check_world_consistency(
     try:
         raw = (prompt | llm).invoke({
             "anchors": json.dumps(anchors, ensure_ascii=False),
-            "full_text": full_text,
+            "full_text": full_text[:_MAX_MANUSCRIPT_CHARS],
         })
         content = raw.content if hasattr(raw, "content") else str(raw)
         data = _extract_json(content) or {"issues": []}

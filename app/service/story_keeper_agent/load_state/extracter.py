@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -8,9 +8,9 @@ from typing import Any, Dict, List, Optional
 
 try:
     from dotenv import load_dotenv
-    from langchain_upstage import ChatUpstage
+    from langchain_google_genai import ChatGoogleGenerativeAI
 except ImportError:
-    ChatUpstage = None
+    ChatGoogleGenerativeAI = None
 
 
 def _project_root() -> Path:
@@ -85,12 +85,12 @@ class PlotManager:
         except Exception:
             pass
 
-    def _init_llm(self) -> Optional["ChatUpstage"]:
-        key = (os.getenv("UPSTAGE_API_KEY") or "").strip()
-        if not key or ChatUpstage is None:
+    def _init_llm(self) -> Optional["ChatGoogleGenerativeAI"]:
+        key = (os.getenv("GOOGLE_API_KEY") or "").strip()
+        if not key or ChatGoogleGenerativeAI is None:
             return None
         try:
-            return ChatUpstage(model="solar-pro")
+            return ChatGoogleGenerativeAI(model="gemini-2.5-flash")
         except Exception:
             return None
 

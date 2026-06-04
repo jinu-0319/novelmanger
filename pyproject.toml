@@ -20,7 +20,7 @@ dependencies = [
     # --- LLM & LangChain Ecosystem ---
     "langchain>=0.2.0",             # LangChain 프레임워크
     "langchain-core>=0.2.0",
-    "langchain-upstage>=0.1.0",     # Upstage Solar 연동
+    "langchain-google-genai>=2.0.0", # Google Gemini 연동
     "langchain-openai>=0.1.0",      # [추가] OpenAI 모델 연동 (테스트 및 백업용)
     "langchain-chroma>=0.1.0",      # LangChain용 Chroma 통합
     "langchain-community>=0.2.0",   # [필수] GoogleSerperAPIWrapper 포함됨
@@ -32,11 +32,7 @@ dependencies = [
     "pydantic>=2.7.0",              # 데이터 검증
     "pydantic-settings>=2.2.0",     # 환경설정 관리
     "tiktoken>=0.7.0",              # 토큰 계산용
-    # --- Streamlit & Frontend (Merged) ---
-    "streamlit>=1.32.0",            # 스트림릿 코어
-    "streamlit-quill>=0.0.2",       # 텍스트 에디터 컴포넌트
     "requests>=2.31.0",             # HTTP 요청
-    "beautifulsoup4>=4.12.0",       # HTML 파싱 (bs4)
     "olefile>=0.47",
     "python-docx>=1.2.0",
     "pymupdf>=1.26.7",

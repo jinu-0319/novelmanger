@@ -4,7 +4,7 @@ from chromadb.config import Settings
 from typing import List, Dict, Any
 
 # Solar 임베딩 라이브러리
-from langchain_upstage import UpstageEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 # [변경 1] 로컬 경로 설정 삭제
 # CHROMA_DB_PATH = ... (삭제)
@@ -16,37 +16,44 @@ _shared_client = None
 class ManuscriptRepository:
     def __init__(self):
         global _shared_client
+        self.available = False
+        self.client = None
+        self.collection = None
 
-        # 1. 임베딩 함수 생성
-        self.embedding_function = UpstageEmbeddings(model="solar-embedding-1-large")
-
-        if _shared_client is None:
-            # [변경 2] 환경변수에서 호스트/포트 가져오기
-            chroma_host = os.getenv("CHROMA_HOST", "chromadb")
-            chroma_port = os.getenv("CHROMA_PORT", "8000")
-
-            print(f"📡 [ManuscriptRepo] ChromaDB 서버 연결 시도: {chroma_host}:{chroma_port}")
-
-            # [변경 3] HttpClient로 변경 (서버 접속 모드)
-            _shared_client = chromadb.HttpClient(
-                host=chroma_host,
-                port=int(chroma_port),
-                settings=Settings(allow_reset=True, anonymized_telemetry=False)
-            )
-
-        self.client = _shared_client
-
-        # 컬렉션 가져오기
         try:
-            self.collection = self.client.get_collection(name=COLLECTION_NAME)
-        except Exception:
-            # 혹시 컬렉션이 아직 안 만들어졌을 경우를 대비 (보통 vector_store에서 만들지만 안전하게)
-            print(f"⚠️ 컬렉션 '{COLLECTION_NAME}'을 찾을 수 없습니다. (아직 데이터가 없을 수 있음)")
-            self.collection = None
+            # 1. 임베딩 함수 생성
+            self.embedding_function = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+
+            if _shared_client is None:
+                chroma_host = os.getenv("CHROMA_HOST", "chromadb")
+                chroma_port = os.getenv("CHROMA_PORT", "8000")
+
+                print(f"📡 [ManuscriptRepo] ChromaDB 서버 연결 시도: {chroma_host}:{chroma_port}")
+
+                _shared_client = chromadb.HttpClient(
+                    host=chroma_host,
+                    port=int(chroma_port),
+                    settings=Settings(allow_reset=True, anonymized_telemetry=False)
+                )
+
+            self.client = _shared_client
+
+            # 컬렉션 가져오기
+            try:
+                self.collection = self.client.get_collection(name=COLLECTION_NAME)
+            except Exception:
+                # 컬렉션이 아직 없는 경우 (데이터 미등록 상태) → 검색 불가지만 서버는 정상
+                print(f"⚠️ 컬렉션 '{COLLECTION_NAME}'을 찾을 수 없습니다. (아직 데이터가 없을 수 있음)")
+                self.collection = None
+
+            self.available = True  # 클라이언트 연결 자체는 성공
+
+        except Exception as e:
+            print(f"⚠️ [ManuscriptRepo] ChromaDB 연결 실패 - 로컬 벡터 검색 비활성화: {e}")
+            _shared_client = None  # 다음 인스턴스가 재시도할 수 있도록 초기화
 
     def search(self, query_text: str, n_results: int = 1) -> Dict[str, Any]:
-        if self.collection is None:
-            print("⚠️ 컬렉션이 없어서 검색을 수행할 수 없습니다.")
+        if not self.available or self.collection is None:
             return {"documents": [[]], "distances": [[]]}
 
         try:

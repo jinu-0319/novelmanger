@@ -1,4 +1,4 @@
-import os
+﻿import os
 from typing import Optional
 from dotenv import load_dotenv
 
@@ -22,15 +22,14 @@ class BaseSettings:
         return value
 
 
-class UpstageSettings(BaseSettings):
-    """Upstage API settings"""
-    
+class GeminiSettings(BaseSettings):
+    """Google Gemini API settings"""
+
     def __init__(self):
         super().__init__()
-        self.api_key = self.get_env("UPSTAGE_API_KEY", required=True)
-        self.base_url = self.get_env("UPSTAGE_BASE_URL", "https://api.upstage.ai/v1")
-        self.embedding_model = self.get_env("UPSTAGE_EMBEDDING_MODEL", "solar-embedding-1-large-query")
-        self.chat_model = self.get_env("UPSTAGE_CHAT_MODEL", "solar-1-mini-chat")
+        self.api_key = self.get_env("GOOGLE_API_KEY", required=True)
+        self.chat_model = self.get_env("GEMINI_CHAT_MODEL", "gemini-2.5-flash")
+        self.embedding_model = self.get_env("GEMINI_EMBEDDING_MODEL", "models/text-embedding-004")
 
 
 class ChromaDBSettings(BaseSettings):
@@ -43,5 +42,5 @@ class ChromaDBSettings(BaseSettings):
         self.collection_name = self.get_env("CHROMA_COLLECTION_NAME", "upstage_embeddings")
 
 
-upstage_settings = UpstageSettings()
+gemini_settings = GeminiSettings()
 chromadb_settings = ChromaDBSettings()

@@ -1,6 +1,6 @@
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.ruunables import RunnableConfig
+from langchain_core.runnables import RunnableConfig
 from app.agents.state import MainState
 from app.agents.utils import clean_and_parse_json
 

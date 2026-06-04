@@ -7,7 +7,7 @@ load_dotenv()
 
 import chromadb
 from langchain_chroma import Chroma
-from langchain_upstage import UpstageEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_core.documents import Document
 
 # 벡터 DB가 저장될 로컬 폴더 경로
@@ -15,30 +15,37 @@ from langchain_core.documents import Document
 
 class HistoryVectorStore:
     def __init__(self):
-        # 1. 임베딩 모델 설정 (Upstage Solar)
-        self.embedding_model = UpstageEmbeddings(model="solar-embedding-1-large")
+        self.available = False
+        self.client = None
+        self.vector_db = None
+        self.embedding_model = None
 
-        # [변경 3] 환경변수에서 ChromaDB 접속 정보 가져오기
-        # Kubernetes Service 이름이 'chromadb'라면 host 기본값을 'chromadb'로 설정
-        chroma_host = os.getenv("CHROMA_HOST", "chromadb")
-        chroma_port = os.getenv("CHROMA_PORT", "8000")
+        try:
+            self.embedding_model = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
 
-        # [변경 4] HttpClient 생성 (서버 접속용)
-        # 로컬 파일에 쓰는 것이 아니라, http://chromadb:8000 으로 접속합니다.
-        self.client = chromadb.HttpClient(host=chroma_host, port=int(chroma_port))
+            chroma_host = os.getenv("CHROMA_HOST", "chromadb")
+            chroma_port = os.getenv("CHROMA_PORT", "8000")
 
-        # [변경 5] Chroma 초기화 시 client 주입
-        self.vector_db = Chroma(
-            client=self.client,
-            collection_name="history_collection",
-            embedding_function=self.embedding_model,
-        )
+            self.client = chromadb.HttpClient(host=chroma_host, port=int(chroma_port))
+
+            self.vector_db = Chroma(
+                client=self.client,
+                collection_name="history_collection",
+                embedding_function=self.embedding_model,
+            )
+            self.available = True
+            print(f"✅ [VectorStore] ChromaDB 연결 성공: {chroma_host}:{chroma_port}")
+        except Exception as e:
+            print(f"⚠️ [VectorStore] ChromaDB 연결 실패 - 벡터 검색 비활성화: {e}")
 
     def sync_from_json(self, entities: List[Dict[str, Any]]):
         """
         JSON 데이터를 받아 벡터 DB를 '통째로' 갱신합니다.
         (데이터 양이 적을 때는 이 방식이 무결성 유지에 가장 확실합니다)
         """
+        if not self.available:
+            print("⚠️ [VectorStore] ChromaDB 미연결 - sync 건너뜀")
+            return
         print(f"🔄 벡터 DB 동기화 시작... ({len(entities)}건)")
 
         try:
@@ -88,6 +95,8 @@ class HistoryVectorStore:
         """
         유사도 검색 수행
         """
+        if not self.available or self.vector_db is None:
+            return []
         # 유사도 점수와 함께 반환 (score가 낮을수록 유사함 - 거리 기반일 경우)
         results = self.vector_db.similarity_search_with_score(query, k=top_k)
         return results

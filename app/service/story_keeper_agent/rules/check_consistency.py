@@ -1,10 +1,16 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+import json
+import re as _re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_upstage import ChatUpstage
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+# 원고 최대 전송 길이 (룰 검사 & 배치 검증 공통)
+_MAX_MANUSCRIPT_CHARS = 8000
+_ANY_JSON_RE = _re.compile(r"\{.*\}", _re.DOTALL)
 
 TYPE_LABELS = {
     "world": "세계관 오류",
@@ -188,58 +194,78 @@ def _merge_same_sentence(issues: List[Issue]) -> List[Issue]:
     return merged
 
 
-def _verify_issue_not_resolved_by_later_text(*, issue: Issue, full_text: str) -> bool:
-    if not full_text.strip():
-        return True
-    if not issue.sentence or not issue.sentence.strip():
-        return True
+def _batch_verify_unresolved(issues: List[Issue], full_text: str) -> List[bool]:
+    """
+    여러 이슈를 한 번의 LLM 호출로 일괄 검증.
+    기존 _verify_issue_not_resolved_by_later_text 의 N번 호출을 1번으로 줄임.
 
-    llm = ChatUpstage(model="solar-pro")
+    반환: issues와 동일 길이의 bool 리스트
+      True  → 해소되지 않음 (이슈 유지)
+      False → 후반에서 해소됨 (이슈 제거)
+    """
+    if not full_text.strip() or not issues:
+        return [True] * len(issues)
+
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+
+    issue_list = [
+        {
+            "idx": i,
+            "title": iss.title or "",
+            "sentence": iss.sentence or "",
+            "reason": iss.reason or "",
+        }
+        for i, iss in enumerate(issues)
+    ]
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", """
 너는 '이슈 후반 해소 검증기'다.
-반드시 원고 전체를 끝까지 읽고 판단한다.
+아래 issues 목록의 각 항목에 대해, 원고를 끝까지 읽고
+해당 sentence가 이후 내용에서 명시적으로 정정/해소되는지 판단해라.
 
-판정:
-- issue_sentence가 후반에서 명시적으로 정정/해소되면 resolved=true
+판정 기준:
+- 후반에서 명시적으로 정정/해소 → resolved: true
 - 근거 없이 추측하지 말 것. 원고 문장 기반으로만.
 
 출력 JSON only:
-{{{{ "resolved": true|false }}}}
+{{ "results": [ {{ "idx": 0, "resolved": true }}, {{ "idx": 1, "resolved": false }}, ... ] }}
 """),
-        ("human", """[issue_title]
-{title}
+        ("human", """[issues]
+{issues_json}
 
-[issue_sentence]
-{issue_sentence}
-
-[issue_reason]
-{issue_reason}
-
-[manuscript_full]
-{full_text}
+[manuscript]
+{manuscript}
 """),
     ])
 
     try:
         raw = (prompt | llm).invoke({
-            "title": issue.title or "",
-            "issue_sentence": issue.sentence or "",
-            "issue_reason": issue.reason or "",
-            "full_text": full_text,
+            "issues_json": json.dumps(issue_list, ensure_ascii=False),
+            "manuscript": full_text[:_MAX_MANUSCRIPT_CHARS],
         })
         content = (raw.content if hasattr(raw, "content") else str(raw)) or ""
+
+        m = _ANY_JSON_RE.search(content)
+        data: Dict[str, Any] = {}
+        if m:
+            try:
+                data = json.loads(m.group(0))
+            except Exception:
+                pass
+
+        results_map: Dict[int, bool] = {}
+        for r in (data.get("results") or []):
+            if isinstance(r, dict) and "idx" in r:
+                results_map[int(r["idx"])] = bool(r.get("resolved", False))
+
+        # resolved=True  → 이미 해소됨 → keep=False (제거)
+        # resolved=False → 미해소       → keep=True  (유지)
+        return [not results_map.get(i, False) for i in range(len(issues))]
+
     except Exception:
-        return True
-
-    c = content.lower()
-    if '"resolved": true' in c:
-        return False
-    if '"resolved": false' in c:
-        return True
-
-    return True
+        # LLM 실패 시 보수적으로 전부 유지
+        return [True] * len(issues)
 
 
 def check_consistency(
@@ -266,6 +292,8 @@ def check_consistency(
     full_text = episode_facts.get("raw_text", "") if isinstance(episode_facts, dict) else ""
 
     alive: List[Issue] = []
+    candidates: List[Issue] = []  # 배치 검증 대상
+
     for i in issues:
         if _is_failure_issue(i):
             i.severity = "high"
@@ -283,12 +311,16 @@ def check_consistency(
         if _looks_like_non_conflict(i.reason, i.title):
             continue
 
-        if not _verify_issue_not_resolved_by_later_text(issue=i, full_text=full_text):
-            continue
+        candidates.append(i)
 
+    # 이슈별 개별 LLM 호출(N번) → 단일 배치 호출(1번)
+    keep_flags = _batch_verify_unresolved(candidates, full_text)
+
+    for i, keep in zip(candidates, keep_flags):
+        if not keep:
+            continue
         if _severity_rank(i.severity) < threshold_rank:
             continue
-
         alive.append(i)
 
     merged = _merge_same_sentence(alive)

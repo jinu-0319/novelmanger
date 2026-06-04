@@ -20,10 +20,32 @@ from app.common.history.vector_store import vector_store
 from typing import List, Optional, Any, Dict
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Path as FPath
+from datetime import datetime, timezone
 import uuid
+import json
+import os
 
 # DB 파일 경로 (루트 기준이므로 app/... 으로 시작)
 HISTORY_DB_PATH = "app/data/history_db.json"
+DOCUMENTS_DB_PATH = "app/data/documents.json"
+
+
+def _read_documents() -> Dict[str, Any]:
+    if not os.path.exists(DOCUMENTS_DB_PATH):
+        return {}
+    try:
+        with open(DOCUMENTS_DB_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_documents(docs: Dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(DOCUMENTS_DB_PATH), exist_ok=True)
+    with open(DOCUMENTS_DB_PATH, "w", encoding="utf-8") as f:
+        json.dump(docs, f, ensure_ascii=False, indent=2)
 
 
 @asynccontextmanager
@@ -33,9 +55,15 @@ async def lifespan(app: FastAPI):
     # 1. DB 파일 초기화 확인
     history_repo.init_db(HISTORY_DB_PATH)
 
-    # 2. 벡터 스토어 동기화 (기존 데이터 로드)
-    current_entities = history_repo.list_entities(HISTORY_DB_PATH)
-    vector_store.sync_from_json(current_entities)
+    # 2. 벡터 스토어 동기화 (ChromaDB가 실행 중일 때만)
+    if vector_store.available:
+        try:
+            current_entities = history_repo.list_entities(HISTORY_DB_PATH)
+            vector_store.sync_from_json(current_entities)
+        except Exception as e:
+            print(f"⚠️ [Startup] 벡터 DB 동기화 실패 (계속 진행): {e}")
+    else:
+        print("⚠️ [Startup] ChromaDB 미연결 - Clio 로컬 벡터 검색 비활성화 (웹 검색은 정상 동작)")
 
     yield
     print("👋 [Shutdown] 서버 종료")
@@ -62,9 +90,15 @@ app.add_middleware(
 # --------------------------------------------------------------------------
 
 class DocumentPayload(BaseModel):
-    doc_id: str
+    id: str
+    episode_no: int = 1
     title: str = ""
-    content: str
+    content: str = ""
+
+
+class AnalyzeTextRequest(BaseModel):
+    text: str
+    episode_no: int = 1
 
 
 class MaterialPayload(BaseModel):
@@ -86,8 +120,35 @@ class IngestRequest(BaseModel):
 
 @app.post("/documents/save", tags=["Document"])
 def api_save_document(doc: DocumentPayload):
-    print(f"📥 [Doc Save] {doc.title} (ID: {doc.doc_id}) - {len(doc.content)}자")
-    return {"status": "success", "msg": "문서가 저장되었습니다."}
+    docs = _read_documents()
+    now = datetime.now(timezone.utc).isoformat()
+    existing = docs.get(doc.id, {})
+    docs[doc.id] = {
+        "id": doc.id,
+        "episode_no": doc.episode_no,
+        "title": doc.title,
+        "content": doc.content,
+        "created_at": existing.get("created_at", now),
+        "updated_at": now,
+    }
+    _write_documents(docs)
+    print(f"💾 [Doc Save] {doc.title} (ID: {doc.id}) - {len(doc.content)}자")
+    return {"status": "success", "id": doc.id}
+
+
+@app.get("/documents", tags=["Document"])
+def api_list_documents():
+    docs = _read_documents()
+    return sorted(docs.values(), key=lambda d: d.get("episode_no", 0))
+
+
+@app.delete("/documents/{doc_id}", tags=["Document"])
+def api_delete_document(doc_id: str = FPath(...)):
+    docs = _read_documents()
+    docs.pop(doc_id, None)
+    _write_documents(docs)
+    print(f"🗑️ [Doc Delete] ID: {doc_id}")
+    return {"status": "success"}
 
 
 # --------------------------------------------------------------------------
@@ -95,42 +156,24 @@ def api_save_document(doc: DocumentPayload):
 # --------------------------------------------------------------------------
 
 @app.post("/analyze/text", tags=["Analysis"])
-def api_analyze_text(payload: DocumentPayload):
-    content = payload.content
-    print(f"🔄 [Analyze] 요청: {len(content)}자")
+def api_analyze_text(payload: AnalyzeTextRequest):
+    from app.service.story_keeper_agent.pipeline import run_pipeline
 
-    # 더미 분석 로직 (키워드에 따라 다른 반응)
-    results = []
+    text = payload.text
+    if not text.strip():
+        return []
 
-    # 1. 역사 고증 (Clio)
-    if "1820" in content or "나폴레옹" in content:
-        results.append({
-            "role": "clio",
-            "msg": "나폴레옹은 1821년에 사망했습니다. 1820년에는 세인트헬레나 섬에 유배 중이었습니다.",
-            "fix": "연도 확인 필요"
-        })
-    else:
-        results.append({
-            "role": "clio",
-            "msg": "역사적 배경 검토 완료 (특이사항 없음)",
-            "fix": "-"
-        })
+    print(f"🔄 [Story Keeper] 분석 요청: {len(text)}자, episode={payload.episode_no}")
+    result = run_pipeline(episode_no=payload.episode_no, raw_text=text)
 
-    # 2. 설정 오류 (Story Keeper)
-    if "대검" in content and "사격" in content:
-        results.append({
-            "role": "story",
-            "msg": "주인공은 '대검' 사용자인데 '사격'을 하고 있습니다.",
-            "fix": "무기 설정 충돌"
-        })
-    else:
-        results.append({
-            "role": "story",
-            "msg": "설정 충돌 없음",
-            "fix": "-"
-        })
-
-    return results
+    return [
+        {
+            "title": e.get("title") or e.get("type_label", "설정 오류"),
+            "description": e.get("reason", ""),
+            "severity": e.get("severity", "medium"),
+        }
+        for e in result.get("edits", [])
+    ]
 
 
 # --------------------------------------------------------------------------
