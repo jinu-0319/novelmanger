@@ -5,8 +5,8 @@ import { useSearchParams } from "next/navigation";
 import { useStore } from "@/store/useStore";
 import Sidebar from "@/components/layout/Sidebar";
 import NovelEditor, { type NovelEditorRef } from "@/components/editor/NovelEditor";
-import MonetaPanel from "@/components/editor/MonetaPanel";
-import ReviewPanel from "@/components/editor/ReviewPanel";
+import AiFeedbackPanel from "@/components/editor/AiFeedbackPanel";
+import StoryPlanPanel from "@/components/editor/StoryPlanPanel";
 import SpellPanel from "@/components/editor/SpellPanel";
 import ExportModal from "@/components/editor/ExportModal";
 
@@ -16,12 +16,18 @@ function EditorContent() {
 
   const documents = useStore((s) => s.getDocuments());
   const activeNovel = useStore((s) => s.getActiveNovel());
-  const monetaPanelOpen = useStore((s) => s.monetaPanelOpen);
-  const toggleMonetaPanel = useStore((s) => s.toggleMonetaPanel);
 
-  const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
+  const [aiFeedbackOpen, setAiFeedbackOpen] = useState(false);
+  const [storyPlanOpen, setStoryPlanOpen] = useState(false);
   const [spellPanelOpen, setSpellPanelOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+
+  // 패널 하나만 열리도록
+  function openPanel(target: "ai" | "story" | "spell") {
+    setAiFeedbackOpen(target === "ai");
+    setStoryPlanOpen(target === "story");
+    setSpellPanelOpen(target === "spell");
+  }
   const upsertDocument = useStore((s) => s.upsertDocument);
 
   const activeDoc = documents.find((d) => d.id === docId) ?? documents[0];
@@ -88,11 +94,7 @@ function EditorContent() {
 
             {/* 맞춤법 */}
             <button
-              onClick={() => {
-                setSpellPanelOpen((v) => !v);
-                if (reviewPanelOpen) setReviewPanelOpen(false);
-                if (monetaPanelOpen) toggleMonetaPanel();
-              }}
+              onClick={() => spellPanelOpen ? setSpellPanelOpen(false) : openPanel("spell")}
               className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-md border transition-all ${
                 spellPanelOpen
                   ? "bg-emerald-500 text-white border-emerald-500"
@@ -104,40 +106,32 @@ function EditorContent() {
               <span className="hidden sm:inline">맞춤법</span>
             </button>
 
-            {/* AI 리뷰 */}
+            {/* 스토리 제안받기 */}
             <button
-              onClick={() => {
-                setReviewPanelOpen((v) => !v);
-                if (monetaPanelOpen) toggleMonetaPanel();
-                if (spellPanelOpen) setSpellPanelOpen(false);
-              }}
+              onClick={() => storyPlanOpen ? setStoryPlanOpen(false) : openPanel("story")}
               className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-md border transition-all ${
-                reviewPanelOpen
-                  ? "bg-amber-500 text-white border-amber-500"
-                  : "bg-notion-bg-secondary text-notion-text-secondary border-notion-border hover:bg-notion-border hover:text-notion-text"
-              }`}
-              title="AI 리뷰"
-            >
-              <span>⭐</span>
-              <span className="hidden sm:inline">AI 리뷰</span>
-            </button>
-
-            {/* Moneta */}
-            <button
-              onClick={() => {
-                toggleMonetaPanel();
-                if (reviewPanelOpen) setReviewPanelOpen(false);
-                if (spellPanelOpen) setSpellPanelOpen(false);
-              }}
-              className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-md border transition-all ${
-                monetaPanelOpen
+                storyPlanOpen
                   ? "bg-moneta text-white border-moneta"
                   : "bg-notion-bg-secondary text-notion-text-secondary border-notion-border hover:bg-notion-border hover:text-notion-text"
               }`}
-              title="Moneta AI"
+              title="스토리 제안받기"
             >
-              <span>🔮</span>
-              <span className="hidden sm:inline">Moneta</span>
+              <span>✨</span>
+              <span className="hidden sm:inline">스토리 제안</span>
+            </button>
+
+            {/* AI 피드백 */}
+            <button
+              onClick={() => aiFeedbackOpen ? setAiFeedbackOpen(false) : openPanel("ai")}
+              className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-md border transition-all ${
+                aiFeedbackOpen
+                  ? "bg-amber-500 text-white border-amber-500"
+                  : "bg-notion-bg-secondary text-notion-text-secondary border-notion-border hover:bg-notion-border hover:text-notion-text"
+              }`}
+              title="AI 피드백"
+            >
+              <span>🤖</span>
+              <span className="hidden sm:inline">AI 피드백</span>
             </button>
           </div>
         </div>
@@ -166,10 +160,20 @@ function EditorContent() {
             )}
           </div>
 
-          {monetaPanelOpen && activeDoc && (
-            <MonetaPanel
+          {storyPlanOpen && activeDoc && (
+            <StoryPlanPanel
               getContent={() => editorRef.current?.getHTML() ?? activeDoc.content}
-              applyContent={handleApplyContent}
+              onClose={() => setStoryPlanOpen(false)}
+              episodeNo={activeDoc.episode_no}
+              novelTitle={activeNovel?.title}
+              genre={activeNovel?.genre}
+            />
+          )}
+
+          {aiFeedbackOpen && activeDoc && (
+            <AiFeedbackPanel
+              getContent={() => editorRef.current?.getHTML() ?? activeDoc.content}
+              onClose={() => setAiFeedbackOpen(false)}
               episodeNo={activeDoc.episode_no}
               docTitle={activeDoc.title}
               novelTitle={activeNovel?.title}
@@ -195,16 +199,6 @@ function EditorContent() {
             />
           )}
 
-          {reviewPanelOpen && activeDoc && (
-            <ReviewPanel
-              getContent={() => editorRef.current?.getHTML() ?? activeDoc.content}
-              onClose={() => setReviewPanelOpen(false)}
-              episodeNo={activeDoc.episode_no}
-              docTitle={activeDoc.title}
-              novelTitle={activeNovel?.title}
-              genre={activeNovel?.genre}
-            />
-          )}
         </div>
       </main>
     </div>
